@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#151B2E">
+<meta name="description" content="ติดตามพอร์ตหุ้นไทยและสหรัฐ พร้อมเตือนราคาที่คุณตั้งเอง">
+<title>พอร์ตของฉัน</title>
+
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- แถบสถานะการเชื่อมต่อ / ข้อมูลค้าง -->
+<div id="banner" class="banner" hidden></div>
+
+<!-- หน้าเข้าสู่ระบบ -->
+<section id="gate" class="gate" hidden>
+  <div class="gate-inner">
+    <h1 class="gate-title">พอร์ตของฉัน</h1>
+    <p class="gate-sub">ติดตามหุ้นไทยและสหรัฐในที่เดียว พร้อมเตือนราคาตามที่คุณตั้งไว้</p>
+
+    <div class="field">
+      <label for="g-api">ที่อยู่เซิร์ฟเวอร์ (Apps Script Web App)</label>
+      <input id="g-api" type="url" inputmode="url" autocomplete="off"
+             placeholder="https://script.google.com/macros/s/.../exec">
+      <p class="hint" id="g-api-hint">วางลิงก์ที่ได้ตอน Deploy ครั้งแรก แล้วระบบจะจำไว้ให้</p>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="g-user">ชื่อผู้ใช้</label>
+        <input id="g-user" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="เช่น somchai">
+      </div>
+      <div class="field">
+        <label for="g-pin">PIN</label>
+        <input id="g-pin" type="password" inputmode="numeric" autocomplete="current-password" placeholder="อย่างน้อย 6 หลัก">
+      </div>
+    </div>
+
+    <button id="g-login" class="btn btn-primary">เข้าสู่ระบบ</button>
+    <button id="g-register" class="btn btn-ghost">สร้างบัญชีใหม่</button>
+    <p class="gate-note">ข้อมูลทั้งหมดเก็บใน Google Sheets ของคุณเอง ไม่ผ่านเซิร์ฟเวอร์ของใคร</p>
+  </div>
+</section>
+
+<!-- แอปหลัก -->
+<div id="app" class="app" hidden>
+  <header class="topbar">
+    <div class="topbar-left">
+      <span id="top-title" class="top-title">พอร์ต</span>
+      <span id="market-pills" class="market-pills"></span>
+    </div>
+    <button id="btn-refresh" class="icon-btn" aria-label="อัปเดตราคาล่าสุด">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </header>
+
+  <main id="views">
+    <section class="view" data-view="dashboard"></section>
+    <section class="view" data-view="transactions" hidden></section>
+    <section class="view" data-view="alerts" hidden></section>
+    <section class="view" data-view="watchlist" hidden></section>
+    <section class="view" data-view="settings" hidden></section>
+  </main>
+
+  <nav class="tabbar" role="tablist">
+    <button class="tab is-active" data-tab="dashboard" role="tab">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V9m5 9V5m5 13v-6m5 6V8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <span>พอร์ต</span>
+    </button>
+    <button class="tab" data-tab="transactions" role="tab">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <span>รายการ</span>
+    </button>
+    <button class="tab" data-tab="alerts" role="tab">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 1 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 13 6 9zM10 18.5a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>เตือน</span>
+      <i id="alert-dot" class="dot" hidden></i>
+    </button>
+    <button class="tab" data-tab="watchlist" role="tab">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+      <span>ติดตาม</span>
+    </button>
+    <button class="tab" data-tab="settings" role="tab">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 3v2.5M12 18.5V21M21 12h-2.5M5.5 12H3m13.4-6.4-1.8 1.8M9.4 16.6l-1.8 1.8m10.8 0-1.8-1.8M9.4 7.4 7.6 5.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      <span>ตั้งค่า</span>
+    </button>
+  </nav>
+</div>
+
+<!-- แผงเลื่อนขึ้นสำหรับฟอร์มต่าง ๆ -->
+<div id="sheet" class="sheet" hidden>
+  <div class="sheet-backdrop" data-close></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <div class="sheet-grip"></div>
+    <h2 id="sheet-title" class="sheet-title"></h2>
+    <div id="sheet-body"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="app.js"></script>
+</body>
+</html>

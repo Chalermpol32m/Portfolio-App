@@ -1,0 +1,23 @@
+{
+  "name": "พอร์ตของฉัน — ติดตามและเตือนราคาหุ้น",
+  "short_name": "พอร์ตของฉัน",
+  "description": "ติดตามพอร์ตหุ้นไทยและสหรัฐในสกุลบาท พร้อมเตือนราคาตามเงื่อนไขที่ตั้งเอง",
+  "lang": "th",
+  "dir": "ltr",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#151B2E",
+  "theme_color": "#151B2E",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "ตั้งเตือนราคา", "short_name": "ตั้งเตือน", "url": "./index.html?tab=alerts" },
+    { "name": "บันทึกรายการ", "short_name": "บันทึก", "url": "./index.html?tab=transactions" }
+  ]
+}
