@@ -268,6 +268,7 @@ function renderDashboard() {
         <div style="margin-top:10px;display:flex;gap:8px">
           <button class="btn-sm" data-quick-alert="${esc(p.symbol)}|${esc(p.market)}|${esc(p.currency)}|${p.price}">ตั้งเตือนราคา</button>
           <button class="btn-sm" data-quick-tx="${esc(p.symbol)}|${esc(p.market)}|${esc(p.currency)}|${p.price}">บันทึกซื้อ/ขาย</button>
+          <button class="btn-sm" data-quick-journal="${esc(p.symbol)}|${esc(p.market)}|${esc(p.currency)}|${p.price}">จดบันทึก</button>
         </div>
       </div>
     </article>`).join('');
@@ -501,10 +502,23 @@ async function renderAlerts() {
 
 async function renderWatchlist() {
   const v = view('watchlist');
-  v.innerHTML = skeleton(4);
+  const sub = state.watchSub || 'watch';
+
+  const nav = `
+    <div class="seg" style="margin-bottom:16px">
+      <button data-wsub="watch" class="${sub === 'watch' ? 'is-on' : ''}">หุ้นที่จับตา</button>
+      <button data-wsub="journal" class="${sub === 'journal' ? 'is-on' : ''}">บันทึกการลงทุน</button>
+    </div>`;
+
+  v.innerHTML = nav + skeleton(4);
+
   try {
+    if (sub === 'journal') {
+      v.innerHTML = nav + await journalSection();
+      return;
+    }
     const rows = await api('watchlist.list', {});
-    v.innerHTML = `
+    v.innerHTML = nav + `
       <div class="section-head"><h2>หุ้นที่จับตาดู</h2>
         <button class="btn-sm" data-open="watch">เพิ่มหุ้น</button></div>
       ${rows.length ? rows.map(w => `
@@ -519,6 +533,7 @@ async function renderWatchlist() {
           </div>
           <div class="pos-detail" hidden>
             <button class="btn-sm" data-quick-alert="${esc(w.symbol)}|${esc(w.market)}|${esc(w.currency)}|${w.price}">ตั้งเตือนราคา</button>
+            <button class="btn-sm" data-quick-journal="${esc(w.symbol)}|${esc(w.market)}|${esc(w.currency)}|${w.price}">จดบันทึก</button>
             <button class="btn-sm" data-del-watch="${esc(w.watchId)}">ลบออก</button>
           </div>
         </article>`).join('') : `
@@ -531,8 +546,76 @@ async function renderWatchlist() {
       det.hidden = !det.hidden;
     }));
   } catch (e) {
-    v.innerHTML = `<div class="empty"><strong>โหลดรายการไม่สำเร็จ</strong>${esc(e.message)}</div>`;
+    v.innerHTML = nav + `<div class="empty"><strong>โหลดรายการไม่สำเร็จ</strong>${esc(e.message)}</div>`;
   }
+}
+
+const JN_LABEL = { THESIS: 'เหตุผลที่ซื้อ', REVIEW: 'ทบทวน', EXIT: 'เหตุผลที่ขาย', NOTE: 'บันทึก' };
+
+async function journalSection() {
+  const [rows, sum] = await Promise.all([
+    api('journal.list', { limit: 100 }),
+    api('journal.summary')
+  ]);
+
+  const entry = (j) => `
+    <article class="card" ${j.dueForReview ? 'style="border-color:rgba(242,181,68,.4)"' : ''}>
+      <div class="list-row" style="border:0;padding-top:0">
+        <div>
+          <div><strong>${esc(j.symbol || 'ภาพรวมตลาด')}</strong>
+            <span class="tag">${JN_LABEL[j.type] || j.type}</span>
+            ${j.dueForReview ? '<span class="tag alert">ถึงเวลาทบทวน</span>' : ''}
+            ${j.status === 'closed' ? '<span class="tag cash">ปิดแล้ว</span>' : ''}</div>
+          <div class="pos-sub">${esc(j.date)}${j.conviction ? ' · ความมั่นใจ ' + j.conviction + '/5' : ''}${j.horizon ? ' · ถือ ' + esc(j.horizon) : ''}</div>
+        </div>
+        ${j.changeSincePct !== null ? `
+        <div style="text-align:right">
+          <div class="${plClass(j.changeSincePct)}">${signed(j.changeSincePct, 2)}%</div>
+          <div class="pos-sub">ตั้งแต่วันที่จด</div>
+        </div>` : ''}
+      </div>
+
+      ${j.title ? `<div style="font-weight:500;margin-bottom:4px">${esc(j.title)}</div>` : ''}
+      <div style="white-space:pre-wrap;font-size:14px">${esc(j.thesis)}</div>
+
+      ${(j.priceAtEntry || j.targetPrice || j.stopPrice) ? `
+        <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
+          ${j.priceAtEntry ? `<div class="kv"><span class="k">ราคาตอนจด</span><span class="v">${fmt(j.priceAtEntry, 2)} → ${fmt(j.price, 2)}</span></div>` : ''}
+          ${j.targetPrice ? `<div class="kv"><span class="k">ราคาเป้า</span><span class="v">${fmt(j.targetPrice, 2)}${j.toTargetPct !== null ? ` <span class="muted">(อีก ${fmt(j.toTargetPct, 1)}%)</span>` : ''}</span></div>` : ''}
+          ${j.stopPrice ? `<div class="kv"><span class="k">จุดตัดขาดทุน</span><span class="v">${fmt(j.stopPrice, 2)}${j.toStopPct !== null ? ` <span class="muted">(ห่าง ${fmt(j.toStopPct, 1)}%)</span>` : ''}</span></div>` : ''}
+          ${j.alertCount ? `<div class="kv"><span class="k">ตั้งเตือนไว้</span><span class="v muted">${j.alertCount} เงื่อนไข</span></div>` : ''}
+        </div>` : ''}
+
+      ${j.outcome ? `<div class="pos-sub" style="margin-top:8px">ผลที่เกิดขึ้น: ${esc(j.outcome)}</div>` : ''}
+
+      <div style="margin-top:10px;display:flex;gap:10px">
+        ${j.status === 'open'
+          ? `<button class="link-btn" data-close-jn="${esc(j.entryId)}">ปิดบันทึก</button>
+             <button class="link-btn" data-snooze-jn="${esc(j.entryId)}">เลื่อนทบทวน 1 เดือน</button>` : ''}
+        <button class="link-btn danger" data-del-jn="${esc(j.entryId)}">ลบ</button>
+      </div>
+    </article>`;
+
+  const due = rows.filter(j => j.dueForReview);
+  const rest = rows.filter(j => !j.dueForReview);
+
+  return `
+    <div class="card">
+      <div class="kv"><span class="k">บันทึกทั้งหมด</span><span class="v">${sum.total} รายการ · ครอบคลุม ${sum.symbolsCovered} หุ้น</span></div>
+      <div class="kv"><span class="k">ยังเปิดอยู่</span><span class="v">${sum.open} รายการ</span></div>
+      <div class="kv"><span class="k">ถึงกำหนดทบทวน</span><span class="v ${sum.dueForReview ? 'stale' : ''}">${sum.dueForReview} รายการ</span></div>
+    </div>
+
+    <div class="section-head"><h2>บันทึกการลงทุน</h2>
+      <button class="btn-sm" data-open="journal">จดบันทึกใหม่</button></div>
+
+    ${due.length ? `<div class="section-head"><h2 class="stale">ถึงเวลากลับมาอ่าน</h2></div>${due.map(entry).join('')}` : ''}
+
+    ${rest.length ? rest.map(entry).join('') : (due.length ? '' : `
+      <div class="empty"><strong>ยังไม่มีบันทึก</strong>
+      จดไว้ว่าทำไมถึงซื้อและเงื่อนไขไหนที่จะขาย พออีกหกเดือนกลับมาอ่าน
+      จะรู้ว่าตอนนั้นคิดถูกหรือแค่โชคดี</div>`)}
+  `;
 }
 
 // ---------- หน้าตั้งค่า ----------
@@ -994,6 +1077,105 @@ function sheetDividend(prefill) {
   });
 }
 
+function sheetJournal(prefill) {
+  const p = prefill || {};
+  openSheet('จดบันทึกการลงทุน', `
+    <div class="seg" id="j-type">
+      ${Object.keys(JN_LABEL).map((t, i) =>
+        `<button data-type="${t}" class="${i === 0 ? 'is-on' : ''}">${JN_LABEL[t]}</button>`).join('')}
+    </div>
+
+    <div class="field-row">
+      <div class="field"><label for="j-symbol">ชื่อหุ้น</label>
+        <input id="j-symbol" type="text" autocapitalize="characters" spellcheck="false"
+               value="${esc(p.symbol || '')}" placeholder="เว้นว่างได้ถ้าจดภาพรวมตลาด"></div>
+      <div class="field"><label for="j-market">ตลาด</label>
+        <select id="j-market">
+          <option value="SET" ${p.market === 'US' ? '' : 'selected'}>SET</option>
+          <option value="US" ${p.market === 'US' ? 'selected' : ''}>US</option>
+        </select></div>
+    </div>
+
+    <div class="field"><label for="j-title">หัวข้อสั้นๆ</label>
+      <input id="j-title" type="text" placeholder="เช่น ซื้อเพิ่มตอนงบไตรมาส 2 ออก"></div>
+
+    <div class="field"><label for="j-thesis">เหตุผลและสิ่งที่คาดหวัง</label>
+      <textarea id="j-thesis" rows="5"
+        placeholder="ทำไมถึงซื้อ คาดว่าจะเกิดอะไรขึ้น และอะไรที่จะทำให้เปลี่ยนใจ"></textarea></div>
+
+    <div class="field-row">
+      <div class="field"><label for="j-target">ราคาเป้าหมาย</label>
+        <input id="j-target" type="number" inputmode="decimal" step="any" placeholder="ไม่บังคับ"></div>
+      <div class="field"><label for="j-stop">จุดตัดขาดทุน</label>
+        <input id="j-stop" type="number" inputmode="decimal" step="any" placeholder="ไม่บังคับ"></div>
+    </div>
+    <p class="hint">สองช่องนี้จะถูกตั้งเป็นการเตือนราคาให้อัตโนมัติ ไม่ต้องไปตั้งซ้ำ</p>
+
+    <div class="field-row" style="margin-top:14px">
+      <div class="field"><label for="j-horizon">ตั้งใจถือนาน</label>
+        <select id="j-horizon">
+          <option value="">ไม่ระบุ</option>
+          <option value="1M">1 เดือน</option>
+          <option value="3M" selected>3 เดือน</option>
+          <option value="6M">6 เดือน</option>
+          <option value="1Y">1 ปี</option>
+          <option value="3Y">3 ปีขึ้นไป</option>
+        </select></div>
+      <div class="field"><label for="j-conv">ความมั่นใจ</label>
+        <select id="j-conv">
+          <option value="">ไม่ระบุ</option>
+          <option value="1">1 — ลองดู</option>
+          <option value="2">2</option>
+          <option value="3" selected>3 — ปานกลาง</option>
+          <option value="4">4</option>
+          <option value="5">5 — มั่นใจมาก</option>
+        </select></div>
+    </div>
+
+    <div class="field"><label for="j-review">วันที่อยากกลับมาทบทวน</label>
+      <input id="j-review" type="date">
+      <p class="hint">เว้นว่างไว้ ระบบจะตั้งให้เองตามกรอบเวลาที่เลือก แล้วส่งอีเมลเตือนเมื่อถึงกำหนด</p></div>
+
+    <button class="btn btn-primary" id="j-save">บันทึก</button>
+  `, (root) => {
+    let type = 'THESIS';
+    $$('#j-type button', root).forEach(b => b.addEventListener('click', () => {
+      type = b.dataset.type;
+      $$('#j-type button', root).forEach(x => x.classList.remove('is-on'));
+      b.classList.add('is-on');
+    }));
+
+    $('#j-save', root).addEventListener('click', async () => {
+      const market = $('#j-market', root).value;
+      const btn = $('#j-save', root);
+      btn.disabled = true;
+      try {
+        const r = await api('journal.add', {
+          type,
+          symbol: $('#j-symbol', root).value.trim().toUpperCase(),
+          market,
+          currency: market === 'US' ? 'USD' : 'THB',
+          title: $('#j-title', root).value,
+          thesis: $('#j-thesis', root).value,
+          targetPrice: Number($('#j-target', root).value) || 0,
+          stopPrice: Number($('#j-stop', root).value) || 0,
+          horizon: $('#j-horizon', root).value,
+          conviction: Number($('#j-conv', root).value) || 0,
+          reviewDate: $('#j-review', root).value
+        });
+        closeSheet();
+        toast(r.alertsCreated ? `บันทึกแล้ว พร้อมตั้งเตือน ${r.alertsCreated} เงื่อนไข` : 'บันทึกแล้ว');
+        state.tab = 'watchlist';
+        state.watchSub = 'journal';
+        switchTab('watchlist');
+      } catch (e) {
+        toast(e.message, true);
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
 // ---------- ผูกเหตุการณ์ ----------
 
 document.addEventListener('click', async (ev) => {
@@ -1010,6 +1192,12 @@ document.addEventListener('click', async (ev) => {
     return renderTransactions();
   }
 
+  const wsub = t.closest('[data-wsub]');
+  if (wsub) {
+    state.watchSub = wsub.dataset.wsub;
+    return renderWatchlist();
+  }
+
   const open = t.closest('[data-open]');
   if (open) {
     const kind = open.dataset.open;
@@ -1017,6 +1205,45 @@ document.addEventListener('click', async (ev) => {
     if (kind === 'alert') return sheetAlert();
     if (kind === 'watch') return sheetWatch();
     if (kind === 'div') return sheetDividend();
+    if (kind === 'journal') return sheetJournal();
+  }
+
+  const qj = t.closest('[data-quick-journal]');
+  if (qj) {
+    const [symbol, market, currency] = qj.dataset.quickJournal.split('|');
+    return sheetJournal({ symbol, market, currency });
+  }
+
+  const closeJn = t.closest('[data-close-jn]');
+  if (closeJn) {
+    const outcome = prompt('ผลที่เกิดขึ้นเป็นอย่างไร (เขียนสั้นๆ ไว้อ่านทีหลัง)');
+    if (outcome === null) return;
+    return run('ปิดบันทึกแล้ว', async () => {
+      await api('journal.close', { entryId: closeJn.dataset.closeJn, outcome });
+      await renderWatchlist();
+    });
+  }
+
+  const snoozeJn = t.closest('[data-snooze-jn]');
+  if (snoozeJn) {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 1);
+    return run('เลื่อนไปอีก 1 เดือน', async () => {
+      await api('journal.update', {
+        entryId: snoozeJn.dataset.snoozeJn,
+        reviewDate: d.toISOString().slice(0, 10)
+      });
+      await renderWatchlist();
+    });
+  }
+
+  const delJn = t.closest('[data-del-jn]');
+  if (delJn) {
+    if (!confirm('ลบบันทึกนี้และการเตือนที่ผูกไว้?')) return;
+    return run('ลบแล้ว', async () => {
+      await api('journal.delete', { entryId: delJn.dataset.delJn });
+      await renderWatchlist();
+    });
   }
 
   if (t.closest('[data-discover]')) {
