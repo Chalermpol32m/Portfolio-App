@@ -1,7 +1,7 @@
 /* Service worker — เก็บหน้าแอปไว้เปิดได้ตอนออฟไลน์
    ข้อมูลพอร์ตไม่ผ่านที่นี่ (ต้องสดเสมอ) แต่ app.js เก็บสำเนาล่าสุดไว้ใน localStorage */
 
-const CACHE = 'portfolio-shell-v1';
+const CACHE = 'portfolio-shell-v2';
 const SHELL = [
   './',
   './index.html',

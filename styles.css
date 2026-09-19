@@ -26,6 +26,9 @@
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
+/* คลาสที่กำหนด display เองจะลบล้างการซ่อนด้วย hidden ของเบราว์เซอร์ จึงต้องย้ำตรงนี้ */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   background: var(--ink);
