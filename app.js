@@ -17,6 +17,7 @@ const state = {
   user: JSON.parse(localStorage.getItem(LS.user) || 'null'),
   dashboard: null,
   tab: localStorage.getItem(LS.lastTab) || 'dashboard',
+  subTab: 'tx',
   busy: false,
   installPrompt: null
 };
@@ -300,6 +301,7 @@ function renderDashboard() {
         <div class="hero-label ${plClass(s.realizedTotalTHB)}" style="font-size:20px;font-weight:400">${signed(s.realizedTotalTHB, 0)}</div>
         <div class="kv"><span class="k">จากตัวหุ้น</span><span class="v ${plClass(s.realizedStockTHB)}">${signed(s.realizedStockTHB, 0)}</span></div>
         <div class="kv"><span class="k">จากค่าเงิน</span><span class="v ${plClass(s.realizedFxTHB)}">${signed(s.realizedFxTHB, 0)}</span></div>
+        <div class="kv"><span class="k">เงินปันผล</span><span class="v ${plClass(s.dividendTHB)}">${signed(s.dividendTHB || 0, 0)}</span></div>
       </div>
     </div>
 
@@ -341,31 +343,107 @@ const TX_LABEL = {
 
 async function renderTransactions() {
   const v = view('transactions');
-  v.innerHTML = skeleton(5);
+  const sub = state.subTab || 'tx';
+
+  const nav = `
+    <div class="seg" style="margin-bottom:16px">
+      <button data-sub="tx" class="${sub === 'tx' ? 'is-on' : ''}">ธุรกรรม</button>
+      <button data-sub="div" class="${sub === 'div' ? 'is-on' : ''}">เงินปันผล</button>
+    </div>`;
+
+  v.innerHTML = nav + skeleton(4);
+
   try {
-    const rows = await api('tx.list', { limit: 200 });
-    v.innerHTML = `
-      <div class="section-head"><h2>ธุรกรรมทั้งหมด</h2>
-        <button class="btn-sm" data-open="tx">บันทึกรายการ</button></div>
-      ${rows.length ? `<div class="card">${rows.map(t => `
-        <div class="list-row">
-          <div>
-            <div><span class="tag ${t.type === 'BUY' ? 'buy' : t.type === 'SELL' ? 'sell' : 'cash'}">${TX_LABEL[t.type] || t.type}</span>
-              <strong>${esc(t.symbol || t.currency)}</strong></div>
-            <div class="pos-sub">${esc(t.date)}${t.quantity ? ` · ${fmt(t.quantity, t.quantity % 1 ? 4 : 0)} @ ${fmt(t.price, 2)}` : ''}${t.currency !== 'THB' ? ` · FX ${fmt(t.fxRate, 2)}` : ''}</div>
-            ${t.note ? `<div class="pos-sub">${esc(t.note)}</div>` : ''}
-          </div>
-          <div style="text-align:right">
-            <div>${fmt(t.amountLocal, 2)} <span class="muted">${esc(t.currency)}</span></div>
-            <button class="link-btn danger" data-del-tx="${esc(t.txId)}">ลบ</button>
-          </div>
-        </div>`).join('')}</div>` : `
-        <div class="empty"><strong>ยังไม่มีธุรกรรม</strong>
-        บันทึกเงินฝากเข้าพอร์ตเป็นรายการแรก เพื่อให้ยอดเงินสดตรงกับความจริง</div>`}
-    `;
+    const body = sub === 'tx' ? await txSection() : await divSection();
+    v.innerHTML = nav + body;
   } catch (e) {
-    v.innerHTML = `<div class="empty"><strong>โหลดรายการไม่สำเร็จ</strong>${esc(e.message)}</div>`;
+    v.innerHTML = nav + `<div class="empty"><strong>โหลดข้อมูลไม่สำเร็จ</strong>${esc(e.message)}</div>`;
   }
+}
+
+async function txSection() {
+  const rows = await api('tx.list', { limit: 200 });
+  return `
+    <div class="section-head"><h2>ธุรกรรมทั้งหมด</h2>
+      <button class="btn-sm" data-open="tx">บันทึกรายการ</button></div>
+    ${rows.length ? `<div class="card">${rows.map(t => `
+      <div class="list-row">
+        <div>
+          <div><span class="tag ${t.type === 'BUY' ? 'buy' : t.type === 'SELL' ? 'sell' : 'cash'}">${TX_LABEL[t.type] || t.type}</span>
+            <strong>${esc(t.symbol || t.currency)}</strong></div>
+          <div class="pos-sub">${esc(t.date)}${t.quantity ? ` · ${fmt(t.quantity, t.quantity % 1 ? 4 : 0)} @ ${fmt(t.price, 2)}` : ''}${t.currency !== 'THB' ? ` · FX ${fmt(t.fxRate, 2)}` : ''}</div>
+          ${t.note ? `<div class="pos-sub">${esc(t.note)}</div>` : ''}
+        </div>
+        <div style="text-align:right">
+          <div>${fmt(t.amountLocal, 2)} <span class="muted">${esc(t.currency)}</span></div>
+          <button class="link-btn danger" data-del-tx="${esc(t.txId)}">ลบ</button>
+        </div>
+      </div>`).join('')}</div>` : `
+      <div class="empty"><strong>ยังไม่มีธุรกรรม</strong>
+      บันทึกเงินฝากเข้าพอร์ตเป็นรายการแรก เพื่อให้ยอดเงินสดตรงกับความจริง</div>`}
+  `;
+}
+
+async function divSection() {
+  const [rows, sum] = await Promise.all([
+    api('dividends.list', { limit: 100 }),
+    api('dividends.summary')
+  ]);
+
+  const pending = rows.filter(d => d.status === 'pending');
+  const done = rows.filter(d => d.status === 'confirmed');
+
+  const card = (d, isPending) => `
+    <div class="list-row">
+      <div>
+        <div><strong>${esc(d.symbol)}</strong>
+          <span class="tag ${isPending ? 'alert' : 'cash'}">${isPending ? 'รอยืนยัน' : esc(d.payDate)}</span>
+          ${d.source === 'yahoo' ? '<span class="pos-sub">ดึงอัตโนมัติ</span>' : ''}</div>
+        <div class="pos-sub">${fmt(d.perShare, 4)}/หุ้น × ${fmt(d.shares, d.shares % 1 ? 2 : 0)} หุ้น
+          · หัก ณ ที่จ่าย ${fmt(d.whtRate * 100, 0)}%${isPending ? ' · XD ' + esc(d.exDate) : ''}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="up-text">${fmt(d.netTHB, 0)} <span class="muted">บาท</span></div>
+        ${isPending
+          ? `<button class="link-btn" data-confirm-div="${esc(d.divId)}">ยืนยัน</button>
+             <button class="link-btn danger" data-del-div="${esc(d.divId)}">ทิ้ง</button>`
+          : `<button class="link-btn danger" data-del-div="${esc(d.divId)}">ลบ</button>`}
+      </div>
+    </div>`;
+
+  return `
+    <div class="card">
+      <div class="hero-label">เงินปันผลรับ 12 เดือนล่าสุด</div>
+      <div class="hero-value up-text" style="font-size:28px">${fmt(sum.last12mTHB, 0)}<span class="sat">บาท</span></div>
+      <div class="kv"><span class="k">ผลตอบแทนจากมูลค่าปัจจุบัน</span><span class="v">${fmt(sum.yieldOnMarket, 2)}%</span></div>
+      <div class="kv"><span class="k">ผลตอบแทนจากต้นทุน</span><span class="v">${fmt(sum.yieldOnCost, 2)}%</span></div>
+      <div class="kv"><span class="k">รับสะสมทั้งหมด</span><span class="v">${fmt(sum.totalTHB, 0)} บาท จาก ${sum.count} งวด</span></div>
+      <div class="kv"><span class="k">ภาษีหัก ณ ที่จ่ายสะสม</span><span class="v muted">${fmt(sum.taxTHB, 0)} บาท</span></div>
+    </div>
+
+    <div class="section-head"><h2>บันทึกปันผล</h2>
+      <span><button class="btn-sm" data-discover="1">ค้นหาอัตโนมัติ</button>
+      <button class="btn-sm" data-open="div">กรอกเอง</button></span></div>
+
+    ${pending.length ? `
+      <div class="card" style="border-color:rgba(242,181,68,.35)">
+        <div class="kv"><span class="k">รอตรวจและยืนยัน ${pending.length} งวด</span>
+          <span class="v stale">${fmt(sum.pendingNetTHB, 0)} บาท</span></div>
+        ${pending.map(d => card(d, true)).join('')}
+      </div>` : ''}
+
+    <div class="section-head"><h2>ประวัติที่ยืนยันแล้ว</h2></div>
+    ${done.length ? `<div class="card">${done.map(d => card(d, false)).join('')}</div>` : `
+      <div class="empty"><strong>ยังไม่มีเงินปันผล</strong>
+      กด "ค้นหาอัตโนมัติ" ให้ระบบไปกวาดประวัติปันผลของหุ้นที่คุณถือมาให้ตรวจ</div>`}
+
+    ${sum.bySymbol.length ? `
+      <div class="section-head"><h2>แยกรายตัว</h2></div>
+      <div class="card">${sum.bySymbol.map(s => `
+        <div class="kv"><span class="k">${esc(s.symbol)}${s.yieldOnCost !== null && s.yieldOnCost !== undefined
+          ? ` <span class="muted">(${fmt(s.yieldOnCost, 2)}% ต่อต้นทุน)</span>` : ''}</span>
+          <span class="v">${fmt(s.netTHB, 0)} บาท</span></div>`).join('')}</div>` : ''}
+  `;
 }
 
 // ---------- หน้าเตือนราคา ----------
@@ -814,6 +892,108 @@ function sheetWatch() {
   });
 }
 
+function sheetDividend(prefill) {
+  const p = prefill || {};
+  const today = new Date().toISOString().slice(0, 10);
+  openSheet('บันทึกเงินปันผล', `
+    <div class="field-row">
+      <div class="field"><label for="d-symbol">ชื่อหุ้น</label>
+        <input id="d-symbol" type="text" autocapitalize="characters" spellcheck="false"
+               value="${esc(p.symbol || '')}" placeholder="เช่น PTT"></div>
+      <div class="field"><label for="d-market">ตลาด</label>
+        <select id="d-market">
+          <option value="SET" ${p.market === 'US' ? '' : 'selected'}>SET</option>
+          <option value="US" ${p.market === 'US' ? 'selected' : ''}>US</option>
+        </select></div>
+    </div>
+
+    <div class="field-row">
+      <div class="field"><label for="d-ex">วัน XD (ขึ้นเครื่องหมาย)</label>
+        <input id="d-ex" type="date" value="${today}"></div>
+      <div class="field"><label for="d-pay">วันจ่ายเงิน</label>
+        <input id="d-pay" type="date" value="${today}"></div>
+    </div>
+
+    <div class="field-row">
+      <div class="field"><label for="d-per">ปันผลต่อหุ้น</label>
+        <input id="d-per" type="number" inputmode="decimal" step="any" placeholder="0"></div>
+      <div class="field"><label for="d-shares">จำนวนหุ้น</label>
+        <input id="d-shares" type="number" inputmode="decimal" step="any"
+               placeholder="เว้นว่างให้คำนวณเอง"></div>
+    </div>
+
+    <div class="seg" id="d-mode">
+      <button data-mode="auto" class="is-on">หักภาษีให้อัตโนมัติ</button>
+      <button data-mode="manual">กรอกยอดสุทธิเอง</button>
+    </div>
+
+    <div class="field" id="d-net-wrap" hidden>
+      <label for="d-net">ยอดสุทธิที่เข้าบัญชีจริง</label>
+      <input id="d-net" type="number" inputmode="decimal" step="any" placeholder="0">
+      <p class="hint">ระบบจะถอดกลับให้เองว่าถูกหักภาษีไปเท่าไร</p>
+    </div>
+
+    <div class="field" id="d-fx-wrap" hidden>
+      <label for="d-fx">อัตราแลกเปลี่ยนวันที่ได้รับ</label>
+      <input id="d-fx" type="number" inputmode="decimal" step="any"
+             placeholder="ปล่อยว่างเพื่อใช้เรตล่าสุด">
+    </div>
+
+    <div class="field"><label for="d-note">บันทึกช่วยจำ</label>
+      <input id="d-note" type="text" placeholder="ไม่บังคับ"></div>
+
+    <button class="btn btn-primary" id="d-save">บันทึก</button>
+  `, (root) => {
+    let mode = 'auto';
+
+    const sync = () => {
+      $('#d-net-wrap', root).hidden = mode !== 'manual';
+      $('#d-fx-wrap', root).hidden = $('#d-market', root).value !== 'US';
+    };
+
+    $$('#d-mode button', root).forEach(b => b.addEventListener('click', () => {
+      mode = b.dataset.mode;
+      $$('#d-mode button', root).forEach(x => x.classList.remove('is-on'));
+      b.classList.add('is-on');
+      sync();
+    }));
+    $('#d-market', root).addEventListener('change', sync);
+    $('#d-ex', root).addEventListener('change', () => {
+      if (!$('#d-pay', root).value) $('#d-pay', root).value = $('#d-ex', root).value;
+    });
+    sync();
+
+    $('#d-save', root).addEventListener('click', async () => {
+      const market = $('#d-market', root).value;
+      const btn = $('#d-save', root);
+      btn.disabled = true;
+      try {
+        await api('dividends.add', {
+          symbol: $('#d-symbol', root).value.trim().toUpperCase(),
+          market,
+          currency: market === 'US' ? 'USD' : 'THB',
+          exDate: $('#d-ex', root).value,
+          payDate: $('#d-pay', root).value || $('#d-ex', root).value,
+          perShare: Number($('#d-per', root).value),
+          shares: Number($('#d-shares', root).value) || 0,
+          taxMode: mode,
+          net: Number($('#d-net', root).value) || 0,
+          fxRate: Number($('#d-fx', root).value) || 0,
+          note: $('#d-note', root).value
+        });
+        closeSheet();
+        toast('บันทึกเงินปันผลแล้ว');
+        state.subTab = 'div';
+        await renderTransactions();
+        await refresh(false);
+      } catch (e) {
+        toast(e.message, true);
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
 // ---------- ผูกเหตุการณ์ ----------
 
 document.addEventListener('click', async (ev) => {
@@ -824,12 +1004,46 @@ document.addEventListener('click', async (ev) => {
   const tab = t.closest('.tab');
   if (tab) return switchTab(tab.dataset.tab);
 
+  const sub = t.closest('[data-sub]');
+  if (sub) {
+    state.subTab = sub.dataset.sub;
+    return renderTransactions();
+  }
+
   const open = t.closest('[data-open]');
   if (open) {
     const kind = open.dataset.open;
     if (kind === 'tx') return sheetTx();
     if (kind === 'alert') return sheetAlert();
     if (kind === 'watch') return sheetWatch();
+    if (kind === 'div') return sheetDividend();
+  }
+
+  if (t.closest('[data-discover]')) {
+    return run('ค้นหาเสร็จแล้ว', async () => {
+      const r = await api('dividends.discover', { range: '2y' });
+      toast(r.message, r.createdCount === 0);
+      await renderTransactions();
+    });
+  }
+
+  const confDiv = t.closest('[data-confirm-div]');
+  if (confDiv) {
+    return run('ยืนยันแล้ว', async () => {
+      await api('dividends.confirm', { divId: confDiv.dataset.confirmDiv });
+      await renderTransactions();
+      await refresh(false);
+    });
+  }
+
+  const delDiv = t.closest('[data-del-div]');
+  if (delDiv) {
+    if (!confirm('ลบรายการปันผลนี้? ถ้ายืนยันไปแล้วระบบจะถอนเงินสดที่บันทึกไว้ด้วย')) return;
+    return run('ลบแล้ว', async () => {
+      await api('dividends.delete', { divId: delDiv.dataset.delDiv });
+      await renderTransactions();
+      await refresh(false);
+    });
   }
 
   const qa = t.closest('[data-quick-alert]');
