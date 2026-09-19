@@ -557,6 +557,7 @@ async function journalSection() {
     api('journal.list', { limit: 100 }),
     api('journal.summary')
   ]);
+  state.journalRows = rows;
 
   const entry = (j) => `
     <article class="card" ${j.dueForReview ? 'style="border-color:rgba(242,181,68,.4)"' : ''}>
@@ -588,7 +589,8 @@ async function journalSection() {
 
       ${j.outcome ? `<div class="pos-sub" style="margin-top:8px">ผลที่เกิดขึ้น: ${esc(j.outcome)}</div>` : ''}
 
-      <div style="margin-top:10px;display:flex;gap:10px">
+      <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="link-btn" data-edit-jn="${esc(j.entryId)}">แก้ไข</button>
         ${j.status === 'open'
           ? `<button class="link-btn" data-close-jn="${esc(j.entryId)}">ปิดบันทึก</button>
              <button class="link-btn" data-snooze-jn="${esc(j.entryId)}">เลื่อนทบทวน 1 เดือน</button>` : ''}
@@ -1079,66 +1081,65 @@ function sheetDividend(prefill) {
 
 function sheetJournal(prefill) {
   const p = prefill || {};
-  openSheet('จดบันทึกการลงทุน', `
+  const edit = !!p.entryId;
+  openSheet(edit ? 'แก้ไขบันทึก' : 'จดบันทึกการลงทุน', `
     <div class="seg" id="j-type">
-      ${Object.keys(JN_LABEL).map((t, i) =>
-        `<button data-type="${t}" class="${i === 0 ? 'is-on' : ''}">${JN_LABEL[t]}</button>`).join('')}
+      ${Object.keys(JN_LABEL).map((t) =>
+        `<button data-type="${t}" class="${t === (p.type || 'THESIS') ? 'is-on' : ''}">${JN_LABEL[t]}</button>`).join('')}
     </div>
 
     <div class="field-row">
       <div class="field"><label for="j-symbol">ชื่อหุ้น</label>
         <input id="j-symbol" type="text" autocapitalize="characters" spellcheck="false"
-               value="${esc(p.symbol || '')}" placeholder="เว้นว่างได้ถ้าจดภาพรวมตลาด"></div>
+               value="${esc(p.symbol || '')}" ${edit ? 'disabled' : ''}
+               placeholder="เว้นว่างได้ถ้าจดภาพรวมตลาด"></div>
       <div class="field"><label for="j-market">ตลาด</label>
-        <select id="j-market">
+        <select id="j-market" ${edit ? 'disabled' : ''}>
           <option value="SET" ${p.market === 'US' ? '' : 'selected'}>SET</option>
           <option value="US" ${p.market === 'US' ? 'selected' : ''}>US</option>
         </select></div>
     </div>
 
     <div class="field"><label for="j-title">หัวข้อสั้นๆ</label>
-      <input id="j-title" type="text" placeholder="เช่น ซื้อเพิ่มตอนงบไตรมาส 2 ออก"></div>
+      <input id="j-title" type="text" value="${esc(p.title || '')}"
+             placeholder="เช่น ซื้อเพิ่มตอนงบไตรมาส 2 ออก"></div>
 
     <div class="field"><label for="j-thesis">เหตุผลและสิ่งที่คาดหวัง</label>
       <textarea id="j-thesis" rows="5"
-        placeholder="ทำไมถึงซื้อ คาดว่าจะเกิดอะไรขึ้น และอะไรที่จะทำให้เปลี่ยนใจ"></textarea></div>
+        placeholder="ทำไมถึงซื้อ คาดว่าจะเกิดอะไรขึ้น และอะไรที่จะทำให้เปลี่ยนใจ">${esc(p.thesis || '')}</textarea></div>
 
     <div class="field-row">
       <div class="field"><label for="j-target">ราคาเป้าหมาย</label>
-        <input id="j-target" type="number" inputmode="decimal" step="any" placeholder="ไม่บังคับ"></div>
+        <input id="j-target" type="number" inputmode="decimal" step="any"
+               value="${p.targetPrice || ''}" placeholder="ไม่บังคับ"></div>
       <div class="field"><label for="j-stop">จุดตัดขาดทุน</label>
-        <input id="j-stop" type="number" inputmode="decimal" step="any" placeholder="ไม่บังคับ"></div>
+        <input id="j-stop" type="number" inputmode="decimal" step="any"
+               value="${p.stopPrice || ''}" placeholder="ไม่บังคับ"></div>
     </div>
     <p class="hint">สองช่องนี้จะถูกตั้งเป็นการเตือนราคาให้อัตโนมัติ ไม่ต้องไปตั้งซ้ำ</p>
 
     <div class="field-row" style="margin-top:14px">
       <div class="field"><label for="j-horizon">ตั้งใจถือนาน</label>
         <select id="j-horizon">
-          <option value="">ไม่ระบุ</option>
-          <option value="1M">1 เดือน</option>
-          <option value="3M" selected>3 เดือน</option>
-          <option value="6M">6 เดือน</option>
-          <option value="1Y">1 ปี</option>
-          <option value="3Y">3 ปีขึ้นไป</option>
+          ${[['', 'ไม่ระบุ'], ['1M', '1 เดือน'], ['3M', '3 เดือน'], ['6M', '6 เดือน'],
+             ['1Y', '1 ปี'], ['3Y', '3 ปีขึ้นไป']].map(([v, t]) =>
+            `<option value="${v}" ${(p.horizon || '3M') === v ? 'selected' : ''}>${t}</option>`).join('')}
         </select></div>
       <div class="field"><label for="j-conv">ความมั่นใจ</label>
         <select id="j-conv">
-          <option value="">ไม่ระบุ</option>
-          <option value="1">1 — ลองดู</option>
-          <option value="2">2</option>
-          <option value="3" selected>3 — ปานกลาง</option>
-          <option value="4">4</option>
-          <option value="5">5 — มั่นใจมาก</option>
+          ${[['', 'ไม่ระบุ'], ['1', '1 — ลองดู'], ['2', '2'], ['3', '3 — ปานกลาง'],
+             ['4', '4'], ['5', '5 — มั่นใจมาก']].map(([v, t]) =>
+            `<option value="${v}" ${String(p.conviction || 3) === v ? 'selected' : ''}>${t}</option>`).join('')}
         </select></div>
     </div>
 
     <div class="field"><label for="j-review">วันที่อยากกลับมาทบทวน</label>
-      <input id="j-review" type="date">
+      <input id="j-review" type="date" value="${esc(p.reviewDate || '')}">
       <p class="hint">เว้นว่างไว้ ระบบจะตั้งให้เองตามกรอบเวลาที่เลือก แล้วส่งอีเมลเตือนเมื่อถึงกำหนด</p></div>
 
-    <button class="btn btn-primary" id="j-save">บันทึก</button>
+    <button class="btn btn-primary" id="j-save">${edit ? 'บันทึกการแก้ไข' : 'บันทึก'}</button>
   `, (root) => {
-    let type = 'THESIS';
+    let type = p.type || 'THESIS';
     $$('#j-type button', root).forEach(b => b.addEventListener('click', () => {
       type = b.dataset.type;
       $$('#j-type button', root).forEach(x => x.classList.remove('is-on'));
@@ -1150,11 +1151,8 @@ function sheetJournal(prefill) {
       const btn = $('#j-save', root);
       btn.disabled = true;
       try {
-        const r = await api('journal.add', {
+        const body = {
           type,
-          symbol: $('#j-symbol', root).value.trim().toUpperCase(),
-          market,
-          currency: market === 'US' ? 'USD' : 'THB',
           title: $('#j-title', root).value,
           thesis: $('#j-thesis', root).value,
           targetPrice: Number($('#j-target', root).value) || 0,
@@ -1162,7 +1160,21 @@ function sheetJournal(prefill) {
           horizon: $('#j-horizon', root).value,
           conviction: Number($('#j-conv', root).value) || 0,
           reviewDate: $('#j-review', root).value
-        });
+        };
+
+        if (edit) {
+          await api('journal.update', Object.assign({ entryId: p.entryId }, body));
+          closeSheet();
+          toast('แก้ไขแล้ว');
+          await renderWatchlist();
+          return;
+        }
+
+        const r = await api('journal.add', Object.assign(body, {
+          symbol: $('#j-symbol', root).value.trim().toUpperCase(),
+          market,
+          currency: market === 'US' ? 'USD' : 'THB'
+        }));
         closeSheet();
         toast(r.alertsCreated ? `บันทึกแล้ว พร้อมตั้งเตือน ${r.alertsCreated} เงื่อนไข` : 'บันทึกแล้ว');
         state.tab = 'watchlist';
@@ -1212,6 +1224,13 @@ document.addEventListener('click', async (ev) => {
   if (qj) {
     const [symbol, market, currency] = qj.dataset.quickJournal.split('|');
     return sheetJournal({ symbol, market, currency });
+  }
+
+  const editJn = t.closest('[data-edit-jn]');
+  if (editJn) {
+    const row = (state.journalRows || []).find(j => j.entryId === editJn.dataset.editJn);
+    if (row) return sheetJournal(row);
+    return toast('ไม่พบข้อมูลบันทึก ลองรีเฟรชหน้าอีกครั้ง', true);
   }
 
   const closeJn = t.closest('[data-close-jn]');
