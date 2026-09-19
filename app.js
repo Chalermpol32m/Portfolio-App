@@ -880,7 +880,7 @@ function sheetAlert(prefill) {
     </div>
 
     <div class="field"><label for="a-target" id="a-target-label">ราคาเป้าหมาย</label>
-      <input id="a-target" type="number" inputmode="decimal" step="any"
+      <input id="a-target" type="number" inputmode="decimal" step="any" min="0"
              value="${p.price ? Number(p.price).toFixed(2) : ''}" placeholder="0"></div>
 
     <div class="field"><label for="a-channel">ส่งแจ้งเตือนทาง</label>
@@ -1110,10 +1110,10 @@ function sheetJournal(prefill) {
 
     <div class="field-row">
       <div class="field"><label for="j-target">ราคาเป้าหมาย</label>
-        <input id="j-target" type="number" inputmode="decimal" step="any"
+        <input id="j-target" type="number" inputmode="decimal" step="any" min="0"
                value="${p.targetPrice || ''}" placeholder="ไม่บังคับ"></div>
       <div class="field"><label for="j-stop">จุดตัดขาดทุน</label>
-        <input id="j-stop" type="number" inputmode="decimal" step="any"
+        <input id="j-stop" type="number" inputmode="decimal" step="any" min="0"
                value="${p.stopPrice || ''}" placeholder="ไม่บังคับ"></div>
     </div>
     <p class="hint">สองช่องนี้จะถูกตั้งเป็นการเตือนราคาให้อัตโนมัติ ไม่ต้องไปตั้งซ้ำ</p>
@@ -1151,12 +1151,19 @@ function sheetJournal(prefill) {
       const btn = $('#j-save', root);
       btn.disabled = true;
       try {
+        const tp = Number($('#j-target', root).value) || 0;
+        const sp = Number($('#j-stop', root).value) || 0;
+        if (tp < 0 || sp < 0) throw new Error('ราคาต้องไม่ติดลบ');
+        if (tp > 0 && sp > 0 && sp >= tp) {
+          throw new Error('จุดตัดขาดทุนต้องต่ำกว่าราคาเป้าหมาย — น่าจะกรอกสลับช่องกัน');
+        }
+
         const body = {
           type,
           title: $('#j-title', root).value,
           thesis: $('#j-thesis', root).value,
-          targetPrice: Number($('#j-target', root).value) || 0,
-          stopPrice: Number($('#j-stop', root).value) || 0,
+          targetPrice: tp,
+          stopPrice: sp,
           horizon: $('#j-horizon', root).value,
           conviction: Number($('#j-conv', root).value) || 0,
           reviewDate: $('#j-review', root).value
