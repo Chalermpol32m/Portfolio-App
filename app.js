@@ -312,6 +312,8 @@ function renderDashboard() {
       <div class="empty"><strong>ยังไม่มีหุ้นในพอร์ต</strong>
       เริ่มจากบันทึกเงินฝากเข้าพอร์ต แล้วบันทึกรายการซื้อหุ้นตัวแรก</div>`}
 
+    <div id="health-slot"></div>
+
     <div class="section-head"><h2>เงินสด</h2></div>
     <div class="card">
       ${d.cash.length ? d.cash.map(c => `
@@ -333,6 +335,120 @@ function renderDashboard() {
       det.hidden = !det.hidden;
     });
   });
+
+  if (d.positions.length) renderHealthSlot();
+}
+
+// ---------- สุขภาพพอร์ต ----------
+
+function healthColor(score) {
+  return score >= 80 ? 'var(--up)' : score >= 60 ? '#8FC5A8' : score >= 40 ? 'var(--amber)' : 'var(--down)';
+}
+
+async function renderHealthSlot(force) {
+  const slot = el('health-slot');
+  if (!slot) return;
+
+  if (state.risk && !force) { slot.innerHTML = healthCard(state.risk); return; }
+
+  slot.innerHTML = `
+    <div class="section-head"><h2>สุขภาพพอร์ต</h2></div>
+    <div class="card"><div class="skeleton"></div><div class="skeleton"></div>
+      <p class="hint">กำลังดึงราคาย้อนหลัง 1 ปีมาคำนวณ ครั้งแรกอาจใช้เวลาครึ่งนาที</p></div>`;
+
+  if (state.riskLoading) return;
+  state.riskLoading = true;
+  try {
+    state.risk = await api('risk.dashboard', { force: !!force });
+    const s = el('health-slot');
+    if (s) s.innerHTML = healthCard(state.risk);
+  } catch (e) {
+    const s = el('health-slot');
+    if (s) s.innerHTML = `<div class="section-head"><h2>สุขภาพพอร์ต</h2></div>
+      <div class="empty"><strong>วิเคราะห์ไม่สำเร็จ</strong>${esc(e.message)}</div>`;
+  } finally {
+    state.riskLoading = false;
+  }
+}
+
+function healthCard(r) {
+  if (r.empty) return '';
+  const h = r.health;
+  return `
+    <div class="section-head"><h2>สุขภาพพอร์ต</h2>
+      <button class="btn-sm" data-risk-detail="1">ดูความเสี่ยง</button></div>
+    <div class="card">
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px">
+        <span style="font-size:36px;font-weight:300;color:${healthColor(h.score)}">${h.score}</span>
+        <span class="muted">/ 100</span>
+        <span class="chip" style="margin-left:auto;color:${healthColor(h.score)}">${esc(h.grade)}</span>
+      </div>
+      ${h.dimensions.map(d => `
+        <div style="margin-bottom:12px">
+          <div class="kv" style="padding:0 0 4px"><span class="k">${esc(d.label)}</span>
+            <span class="v">${d.score === null ? '<span class="muted">—</span>' : d.score}</span></div>
+          <div class="meter"><span style="width:${d.score || 0}%;background:${healthColor(d.score || 0)}"></span></div>
+          <div class="pos-sub" style="margin-top:4px">${esc(d.detail)}</div>
+        </div>`).join('')}
+      <p class="hint">วิเคราะห์เมื่อ ${esc(r.asOf)}</p>
+    </div>`;
+}
+
+function sheetRisk() {
+  const r = state.risk;
+  if (!r || r.empty) return;
+  const p = r.portfolio, c = r.concentration;
+  const pct = (v, d) => v === null || v === undefined ? '—' : fmt(v, d === undefined ? 1 : d) + '%';
+  const num = (v) => v === null || v === undefined ? '—' : fmt(v, 2);
+
+  openSheet('ความเสี่ยงของพอร์ต', `
+    <div class="card">
+      <div class="kv"><span class="k">ความผันผวนต่อปี</span><span class="v">${pct(p.volPct)}</span></div>
+      <div class="kv"><span class="k">Beta เทียบตลาด</span><span class="v">${num(p.beta)}</span></div>
+      <div class="kv"><span class="k">ร่วงหนักสุดในรอบปี</span><span class="v down-text">${pct(p.maxDrawdownPct)}</span></div>
+      <div class="kv"><span class="k">ผลตอบแทน 1 ปี (ถ้าถือแบบนี้)</span><span class="v ${plClass(p.return1yPct)}">${pct(p.return1yPct)}</span></div>
+      <div class="kv"><span class="k">Sharpe Ratio</span><span class="v">${num(p.sharpe)}</span></div>
+      <p class="hint">Sharpe คิดจากอัตราผลตอบแทนไร้ความเสี่ยง ${fmt(p.riskFreePct, 2)}% ปรับได้ในชีท Settings ที่ risk.freeRate</p>
+    </div>
+
+    ${r.benchmarks.length ? `
+      <div class="section-head"><h2>เทียบดัชนีตลาด</h2></div>
+      <div class="card">${r.benchmarks.map(b => `
+        <div style="margin-bottom:8px"><strong>${esc(b.label)}</strong>
+          <div class="kv"><span class="k">ความผันผวน</span><span class="v">${pct(b.volPct)}</span></div>
+          <div class="kv"><span class="k">ร่วงหนักสุด</span><span class="v">${pct(b.maxDrawdownPct)}</span></div>
+          <div class="kv"><span class="k">ผลตอบแทน 1 ปี</span><span class="v ${plClass(b.return1yPct)}">${pct(b.return1yPct)}</span></div>
+        </div>`).join('')}</div>` : ''}
+
+    <div class="section-head"><h2>รายตัว</h2></div>
+    <div class="card">${r.stocks.map(s => s.insufficient ? `
+      <div class="list-row"><div><strong>${esc(s.symbol)}</strong>
+        <div class="pos-sub">ข้อมูลราคาย้อนหลังไม่พอคำนวณ</div></div>
+        <div>${pct(s.weightPct)}</div></div>` : `
+      <div class="list-row">
+        <div><strong>${esc(s.symbol)}</strong> <span class="muted">${pct(s.weightPct)} ของพอร์ต</span>
+          <div class="pos-sub">ผันผวน ${pct(s.volPct)} · Beta ${num(s.beta)} · ร่วงหนักสุด ${pct(s.maxDrawdownPct)}</div></div>
+        <div class="${plClass(s.return1yPct)}" style="text-align:right">${pct(s.return1yPct)}<div class="pos-sub">1 ปี</div></div>
+      </div>`).join('')}</div>
+
+    <div class="section-head"><h2>การกระจุกตัว</h2></div>
+    <div class="card">
+      <div class="kv"><span class="k">จำนวนหุ้น</span><span class="v">${c.holdings} ตัว</span></div>
+      <div class="kv"><span class="k">เทียบเท่าถือเท่ากัน</span><span class="v">${fmt(c.effectiveN, 1)} ตัว</span></div>
+      <div class="kv"><span class="k">ตัวใหญ่สุด</span><span class="v">${pct(c.maxWeightPct)}</span></div>
+      <div class="kv"><span class="k">สามตัวแรกรวมกัน</span><span class="v">${pct(c.top3Pct)}</span></div>
+      <div class="kv"><span class="k">เงินสด</span><span class="v">${pct(c.cashPct)}</span></div>
+      ${c.byMarket.map(m => `<div class="kv"><span class="k">ตลาด ${esc(m.market)}</span><span class="v">${pct(m.pct)}</span></div>`).join('')}
+    </div>
+
+    <div class="section-head"><h2>ข้อสังเกตแต่ละด้าน</h2></div>
+    <div class="card">${r.health.dimensions.map(d => `
+      <div style="margin-bottom:10px"><strong>${esc(d.label)}</strong>
+        <div class="pos-sub">${esc(d.note)}</div></div>`).join('')}</div>
+
+    <p class="hint">${esc(r.caveat)}</p>
+    <button class="btn btn-ghost" data-risk-refresh="1">คำนวณใหม่ด้วยราคาล่าสุด</button>
+  `);
 }
 
 // ---------- หน้ารายการธุรกรรม ----------
@@ -1209,6 +1325,14 @@ document.addEventListener('click', async (ev) => {
   if (sub) {
     state.subTab = sub.dataset.sub;
     return renderTransactions();
+  }
+
+  if (t.closest('[data-risk-detail]')) return sheetRisk();
+
+  if (t.closest('[data-risk-refresh]')) {
+    closeSheet();
+    state.risk = null;
+    return renderHealthSlot(true);
   }
 
   const wsub = t.closest('[data-wsub]');

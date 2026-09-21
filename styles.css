@@ -403,3 +403,13 @@ button, input, select, textarea {
   margin-bottom: 10px;
 }
 @keyframes shimmer { to { background-position: -200% 0; } }
+
+/* ---------- แถบคะแนน ---------- */
+
+.meter {
+  height: 5px;
+  border-radius: 99px;
+  background: var(--ink-3);
+  overflow: hidden;
+}
+.meter span { display: block; height: 100%; border-radius: 99px; transition: width .4s ease; }
