@@ -85,6 +85,12 @@ async function api(action, payload, opts) {
     }
     throw new Error(json.error || 'คำสั่งไม่สำเร็จ');
   }
+
+  // คำสั่งที่เปลี่ยนพอร์ต ทำให้ผลวิเคราะห์ที่จำไว้ในแอปเก่าไป
+  if (/^(tx\.(add|delete)|dividends\.(add|confirm|delete)|portfolio\.rebuild)$/.test(action)) {
+    state.perf = null;
+    state.risk = null;
+  }
   return json.data;
 }
 
@@ -306,6 +312,8 @@ function renderDashboard() {
       </div>
     </div>
 
+    <div id="perf-slot"></div>
+
     <div class="section-head"><h2>หุ้นที่ถืออยู่</h2>
       <button class="btn-sm" data-open="tx">บันทึกรายการ</button></div>
     ${d.positions.length ? positions : `
@@ -337,6 +345,122 @@ function renderDashboard() {
   });
 
   if (d.positions.length) renderHealthSlot();
+  renderPerfSlot();
+}
+
+// ---------- ผลตอบแทนเทียบตลาด ----------
+
+const BENCH_COLORS = { SET50: '#6E8BD6', SP500: '#B67FD0', NASDAQ: '#5FB6C4', CUSTOM: '#E08A5B' };
+
+async function renderPerfSlot(force) {
+  const slot = el('perf-slot');
+  if (!slot) return;
+
+  if (state.perf && !force) { slot.innerHTML = perfCard(state.perf); return; }
+
+  slot.innerHTML = `
+    <div class="section-head"><h2>ผลตอบแทนเทียบตลาด</h2></div>
+    <div class="card"><div class="skeleton"></div><div class="skeleton"></div></div>`;
+
+  if (state.perfLoading) return;
+  state.perfLoading = true;
+  try {
+    state.perf = await api('performance', { force: !!force });
+    const s = el('perf-slot');
+    if (s) s.innerHTML = perfCard(state.perf);
+  } catch (e) {
+    const s = el('perf-slot');
+    if (s) s.innerHTML = `<div class="section-head"><h2>ผลตอบแทนเทียบตลาด</h2></div>
+      <div class="empty"><strong>คำนวณไม่สำเร็จ</strong>${esc(e.message)}</div>`;
+  } finally {
+    state.perfLoading = false;
+  }
+}
+
+function perfCard(p) {
+  if (p.empty) return '';
+  const key = state.perfPeriod || '1M';
+  const per = p.periods.find(x => x.key === key) || p.periods[0];
+  const s = p.series;
+
+  // ตัดเส้นกราฟเฉพาะช่วงที่เลือก แล้วตั้งฐานใหม่เป็น 100 ณ วันเริ่มช่วง
+  let i0 = 0;
+  for (let i = s.dates.length - 1; i >= 0; i--) { if (s.dates[i] <= per.from) { i0 = i; break; } }
+  const rebase = (arr) => {
+    const base = arr[i0];
+    return arr.slice(i0).map(v => (v && base) ? v / base * 100 : null);
+  };
+  const lines = [{ label: 'พอร์ตของคุณ', color: 'var(--text)', width: 2.2, values: rebase(s.portfolio) }];
+  p.benchmarks.forEach(b => lines.push({
+    label: b.label, color: BENCH_COLORS[b.key] || '#8D96B2', width: 1.4, values: rebase(s.bench[b.key])
+  }));
+
+  const firstBench = p.benchmarks[0];
+  const diff = firstBench && per.bench[firstBench.key] !== null
+    ? per.portfolioPct - per.bench[firstBench.key] : null;
+
+  return `
+    <div class="section-head"><h2>ผลตอบแทนเทียบตลาด</h2></div>
+    <div class="card">
+      <div class="seg" style="margin-bottom:12px">
+        ${p.periods.filter(x => x.key !== '1D').map(x =>
+          `<button data-perf-period="${x.key}" class="${x.key === key ? 'is-on' : ''}">${esc(x.key === 'ALL' ? 'ทั้งหมด' : x.key)}</button>`).join('')}
+      </div>
+
+      ${lineChart(lines)}
+
+      <div class="alloc-legend" style="margin:8px 0 14px">${lines.map(l =>
+        `<span><i style="background:${l.color}"></i>${esc(l.label)}</span>`).join('')}</div>
+
+      <div class="kv"><span class="k">พอร์ตของคุณ</span>
+        <span class="v ${plClass(per.portfolioPct)}">${signed(per.portfolioPct, 2)}%</span></div>
+      ${p.benchmarks.map(b => `
+        <div class="kv"><span class="k">${esc(b.label)}</span>
+          <span class="v ${plClass(per.bench[b.key])}">${per.bench[b.key] === null ? '—' : signed(per.bench[b.key], 2) + '%'}</span></div>`).join('')}
+
+      <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
+        <div class="kv"><span class="k">กำไรเป็นเงินในช่วงนี้</span>
+          <span class="v ${plClass(per.pnlTHB)}">${signed(per.pnlTHB, 0)} บาท</span></div>
+        ${per.flowsTHB ? `<div class="kv"><span class="k">เงินฝากสุทธิในช่วงนี้</span>
+          <span class="v muted">${signed(per.flowsTHB, 0)} บาท</span></div>` : ''}
+        ${diff !== null ? `<div class="kv"><span class="k">เทียบ ${esc(firstBench.label)}</span>
+          <span class="v ${plClass(diff)}">${diff >= 0 ? 'ดีกว่า' : 'แพ้'} ${fmt(Math.abs(diff), 2)} จุด</span></div>` : ''}
+      </div>
+
+      ${per.partial ? `<p class="hint">พอร์ตเริ่มเมื่อ ${esc(p.startDate)} ยังไม่ครบช่วงที่เลือก ตัวเลขจึงนับตั้งแต่วันเริ่มพอร์ต</p>` : ''}
+      <p class="hint">${esc(p.note)}</p>
+    </div>`;
+}
+
+/** กราฟเส้นแบบ SVG ล้วน ไม่ต้องโหลดไลบรารี */
+function lineChart(lines) {
+  const W = 320, H = 140, P = 6;
+  const all = lines.flatMap(l => l.values.filter(v => v !== null && isFinite(v)));
+  if (all.length < 2) {
+    return '<div class="empty" style="padding:18px">ข้อมูลยังน้อยเกินไปสำหรับวาดกราฟ ลองดูอีกครั้งในอีกไม่กี่วัน</div>';
+  }
+  let min = Math.min(...all, 100), max = Math.max(...all, 100);
+  if (max - min < 1) { max += 0.5; min -= 0.5; }
+  const n = Math.max(...lines.map(l => l.values.length));
+  const x = i => P + (n > 1 ? i / (n - 1) : 0) * (W - P * 2);
+  const y = v => P + (1 - (v - min) / (max - min)) * (H - P * 2);
+
+  const paths = lines.map(l => {
+    let d = '', pen = false;
+    l.values.forEach((v, i) => {
+      if (v === null || !isFinite(v)) { pen = false; return; }
+      d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1) + ' ';
+      pen = true;
+    });
+    return `<path d="${d}" fill="none" stroke="${l.color}" stroke-width="${l.width}"
+              stroke-linejoin="round" stroke-linecap="round"/>`;
+  }).reverse().join('');                 // วาดพอร์ตทีหลังสุดให้อยู่บนสุด
+
+  return `
+    <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block" role="img" aria-label="กราฟผลตอบแทนเทียบดัชนี">
+      <line x1="${P}" x2="${W - P}" y1="${y(100)}" y2="${y(100)}" stroke="var(--line)" stroke-dasharray="3 4"/>
+      ${paths}
+    </svg>`;
 }
 
 // ---------- สุขภาพพอร์ต ----------
@@ -1325,6 +1449,14 @@ document.addEventListener('click', async (ev) => {
   if (sub) {
     state.subTab = sub.dataset.sub;
     return renderTransactions();
+  }
+
+  const perfBtn = t.closest('[data-perf-period]');
+  if (perfBtn) {
+    state.perfPeriod = perfBtn.dataset.perfPeriod;
+    const s = el('perf-slot');
+    if (s && state.perf) s.innerHTML = perfCard(state.perf);
+    return;
   }
 
   if (t.closest('[data-risk-detail]')) return sheetRisk();
