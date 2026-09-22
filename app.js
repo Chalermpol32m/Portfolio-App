@@ -127,6 +127,7 @@ function showGate() {
 }
 
 function showApp() {
+  loadAccounts();
   el('gate').hidden = true;
   el('app').hidden = false;
   switchTab(state.tab);
@@ -240,6 +241,22 @@ function renderMarketPills(markets) {
   ).join('');
 }
 
+const ACT_ICON = { BUY: '🟢', SELL: '🔴', DIVIDEND: '💰', DEPOSIT: '💵', WITHDRAW: '💸',
+                   FX_CONVERT: '💱', TRANSFER: '🔁', FEE: '🧾', ADJUST: '➕' };
+
+function activityRow(t) {
+  const acc = t.type === 'TRANSFER' ? `${esc(t.account)} → ${esc(t.toAccount)}` : esc(t.account || '');
+  const what = t.type === 'BUY' || t.type === 'SELL'
+    ? `${esc(t.symbol)} ${fmt(t.quantity, t.quantity % 1 ? 4 : 0)} @ ${fmt(t.price, 2)}`
+    : t.type === 'FX_CONVERT' ? esc(t.symbol) : esc(t.symbol || '');
+  return `
+    <div class="list-row">
+      <div><div>${ACT_ICON[t.type] || '•'} <strong>${TX_LABEL[t.type] || t.type}</strong> ${what}</div>
+        <div class="pos-sub">${esc(t.date)}${acc ? ' · ' + acc : ''}</div></div>
+      <div style="text-align:right">${fmt(t.amount, 2)} <span class="muted">${esc(t.currency)}</span></div>
+    </div>`;
+}
+
 const ALLOC_COLORS = ['#6E8BD6', '#4FC08D', '#F2B544', '#B67FD0', '#5FB6C4', '#E08A5B', '#8D96B2'];
 
 function renderDashboard() {
@@ -266,7 +283,11 @@ function renderDashboard() {
       <div class="pos-detail" hidden>
         <div class="kv"><span class="k">ราคาล่าสุด</span><span class="v">${fmt(p.price, 2)} ${esc(p.currency)} <span class="${plClass(p.changePct)}">${signed(p.changePct, 2)}%</span></span></div>
         <div class="kv"><span class="k">มูลค่าตลาด</span><span class="v">${fmt(p.marketValueLocal, 2)} ${esc(p.currency)}</span></div>
+        <div class="kv"><span class="k">ทุนต่อหุ้น (รวมค่าธรรมเนียม)</span><span class="v">${fmt(p.avgCostLocal, 4)} ${esc(p.currency)}</span></div>
+        ${p.avgCostExFeeLocal ? `<div class="kv"><span class="k">ทุนต่อหุ้น (ไม่รวมค่าธรรมเนียม)</span><span class="v muted">${fmt(p.avgCostExFeeLocal, 4)} ${esc(p.currency)}</span></div>` : ''}
         <div class="kv"><span class="k">ต้นทุนรวม</span><span class="v">${fmt(p.costTHB, 0)} บาท</span></div>
+        ${(p.accounts || []).length ? `<div class="kv"><span class="k">ถืออยู่ที่</span><span class="v">${p.accounts.map(a =>
+          esc(a.account) + ' ' + fmt(a.quantity, a.quantity % 1 ? 4 : 0)).join(' · ')}</span></div>` : ''}
         <div class="kv"><span class="k">กำไรจากตัวหุ้น</span><span class="v ${plClass(p.unrealStockTHB)}">${signed(p.unrealStockTHB, 0)} บาท</span></div>
         <div class="kv"><span class="k">กำไรจากค่าเงิน</span><span class="v ${plClass(p.unrealFxTHB)}">${signed(p.unrealFxTHB, 0)} บาท</span></div>
         <div class="kv"><span class="k">เปลี่ยนแปลงวันนี้</span><span class="v ${plClass(p.dayChangeTHB)}">${signed(p.dayChangeTHB, 0)} บาท</span></div>
@@ -296,7 +317,21 @@ function renderDashboard() {
         `<span><i style="background:${ALLOC_COLORS[i % ALLOC_COLORS.length]}"></i>${esc(a.label)} ${fmt(a.pct, 1)}%</span>`).join('')}</div>` : ''}
     </div>
 
-    <div class="split">
+    <div class="card">
+      <div class="kv"><span class="k">ผลตอบแทนรวม</span>
+        <span class="v ${plClass(s.totalPLTHB)}">${s.investedTHB > 0 ? signed(s.totalReturnPct, 2) + '%' : ''}</span></div>
+      <div class="${plClass(s.totalPLTHB)}" style="font-size:24px;font-weight:400;margin-bottom:8px">${signed(s.totalPLTHB, 0)} บาท</div>
+      <div class="kv"><span class="k">กำไรจากราคาหุ้น</span><span class="v ${plClass(s.capitalGainTHB)}">${signed(s.capitalGainTHB, 0)}</span></div>
+      <div class="pos-sub" style="margin:-2px 0 6px">ยังไม่ขาย ${signed(s.unrealTotalTHB, 0)} · ขายแล้ว ${signed(s.realizedStockTHB + s.realizedFxTHB, 0)}
+        · ในนี้เป็นผลค่าเงิน ${signed(s.unrealFxTHB + s.realizedFxTHB, 0)}</div>
+      <div class="kv"><span class="k">เงินปันผล</span><span class="v div-text">${signed(s.dividendTHB || 0, 0)}</span></div>
+      <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)">
+        <div class="kv"><span class="k">เงินลงทุนสุทธิ (ฝาก − ถอน)</span><span class="v">${fmt(s.investedTHB, 0)}</span></div>
+        <div class="kv"><span class="k">เงินสด</span><span class="v cash-text">${fmt(s.cashTHB, 0)}</span></div>
+      </div>
+    </div>
+
+    <div class="split" hidden>
       <div class="card">
         <div class="kv"><span class="k">กำไรยังไม่รับรู้</span></div>
         <div class="hero-label ${plClass(s.unrealTotalTHB)}" style="font-size:20px;font-weight:400">${signed(s.unrealTotalTHB, 0)}</div>
@@ -319,6 +354,9 @@ function renderDashboard() {
     ${d.positions.length ? positions : `
       <div class="empty"><strong>ยังไม่มีหุ้นในพอร์ต</strong>
       เริ่มจากบันทึกเงินฝากเข้าพอร์ต แล้วบันทึกรายการซื้อหุ้นตัวแรก</div>`}
+    ${d.positions.length ? `<p class="hint">ทุนในแอปรวมค่าคอมมิชชัน ค่าธรรมเนียม และ VAT แล้ว จึงสูงกว่าที่แอปโบรกเกอร์แสดงเล็กน้อย
+      กำไรที่เห็นคือกำไรหลังหักค่าใช้จ่ายจริง (กดที่หุ้นเพื่อดูทุนแบบไม่รวมค่าธรรมเนียม) ·
+      ราคาหุ้นไทยจาก Yahoo หน่วงราว 15–20 นาที หลังตลาดปิดจะตรงกับโบรกเกอร์</p>` : ''}
 
     <div id="health-slot"></div>
 
@@ -329,9 +367,23 @@ function renderDashboard() {
           <span class="k">${esc(c.currency)}${c.currency !== 'THB' ? ` · ทุนเฉลี่ย ${fmt(c.avgFxRate, 2)}` : ''}</span>
           <span class="v">${fmt(c.balance, 2)}${c.currency !== 'THB' ? ` <span class="muted">(${fmt(c.valueTHB, 0)} บาท)</span>` : ''}</span>
         </div>
+        ${(c.byAccount || []).length > 1 ? c.byAccount.map(b =>
+          `<div class="kv" style="padding-left:12px"><span class="k">· ${esc(b.account)}</span><span class="v muted">${fmt(b.balance, 2)}</span></div>`).join('') : ''}
         ${c.currency !== 'THB' ? `<div class="kv"><span class="k">กำไรค่าเงินบนเงินสด</span><span class="v ${plClass(c.unrealFxTHB)}">${signed(c.unrealFxTHB, 0)}</span></div>` : ''}
       `).join('') : '<div class="muted">ยังไม่มีเงินสดในพอร์ต</div>'}
     </div>
+
+    ${(d.accounts || []).length > 1 ? `
+      <div class="section-head"><h2>แยกตามโบรกเกอร์</h2></div>
+      <div class="card">${d.accounts.map(a => `
+        <div class="kv"><span class="k">${esc(a.account)}</span><span class="v">${fmt(a.totalTHB, 0)} บาท</span></div>
+        <div class="pos-sub" style="margin:-4px 0 6px">หุ้น ${fmt(a.stocksTHB, 0)} · เงินสด ${fmt(a.cashTHB, 0)}</div>`).join('')}
+      </div>` : ''}
+
+    ${(d.activity || []).length ? `
+      <div class="section-head"><h2>กิจกรรมล่าสุด</h2>
+        <button class="btn-sm" data-goto-ledger="1">ดูเงินสดทั้งหมด</button></div>
+      <div class="card">${d.activity.map(activityRow).join('')}</div>` : ''}
 
     <p class="hint">อัปเดตเมื่อ ${esc(d.asOf)}</p>
   `;
@@ -579,7 +631,8 @@ function sheetRisk() {
 
 const TX_LABEL = {
   BUY: 'ซื้อ', SELL: 'ขาย', DEPOSIT: 'ฝากเงิน', WITHDRAW: 'ถอนเงิน',
-  FX_CONVERT: 'แลกเงิน', DIVIDEND: 'เงินปันผล', FEE: 'ค่าธรรมเนียม', ADJUST: 'ปรับปรุง'
+  FX_CONVERT: 'แลกเงิน', DIVIDEND: 'เงินปันผล', FEE: 'ค่าธรรมเนียม', ADJUST: 'ปรับปรุง',
+  TRANSFER: 'โอนระหว่างบัญชี'
 };
 
 async function renderTransactions() {
@@ -590,12 +643,13 @@ async function renderTransactions() {
     <div class="seg" style="margin-bottom:16px">
       <button data-sub="tx" class="${sub === 'tx' ? 'is-on' : ''}">ธุรกรรม</button>
       <button data-sub="div" class="${sub === 'div' ? 'is-on' : ''}">เงินปันผล</button>
+      <button data-sub="cash" class="${sub === 'cash' ? 'is-on' : ''}">เงินสด</button>
     </div>`;
 
   v.innerHTML = nav + skeleton(4);
 
   try {
-    const body = sub === 'tx' ? await txSection() : await divSection();
+    const body = sub === 'tx' ? await txSection() : sub === 'div' ? await divSection() : await cashSection();
     v.innerHTML = nav + body;
   } catch (e) {
     v.innerHTML = nav + `<div class="empty"><strong>โหลดข้อมูลไม่สำเร็จ</strong>${esc(e.message)}</div>`;
@@ -612,7 +666,8 @@ async function txSection() {
         <div>
           <div><span class="tag ${t.type === 'BUY' ? 'buy' : t.type === 'SELL' ? 'sell' : 'cash'}">${TX_LABEL[t.type] || t.type}</span>
             <strong>${esc(t.symbol || t.currency)}</strong></div>
-          <div class="pos-sub">${esc(t.date)}${t.quantity ? ` · ${fmt(t.quantity, t.quantity % 1 ? 4 : 0)} @ ${fmt(t.price, 2)}` : ''}${t.currency !== 'THB' ? ` · FX ${fmt(t.fxRate, 2)}` : ''}</div>
+          <div class="pos-sub">${esc(t.date)}${t.quantity && t.type !== 'TRANSFER' ? ` · ${fmt(t.quantity, t.quantity % 1 ? 4 : 0)} @ ${fmt(t.price, 2)}` : ''}${t.currency !== 'THB' ? ` · FX ${fmt(t.fxRate, 2)}` : ''}${
+            accountsList().length > 1 ? ` · ${esc(t.account)}${t.toAccount ? ' → ' + esc(t.toAccount) : ''}` : ''}</div>
           ${t.note ? `<div class="pos-sub">${esc(t.note)}</div>` : ''}
         </div>
         <div style="text-align:right">
@@ -885,6 +940,8 @@ async function renderSettings() {
         <div class="kv"><span class="k">ไฟล์สำรองที่เก็บไว้</span><span class="v">${st.backup.fileCount} ไฟล์ (เก็บ ${st.backup.keepDays} วัน)</span></div>
       </div>
 
+      <div id="webull-slot"></div>
+
       <div class="section-head"><h2>การจัดการ</h2></div>
       <button class="btn btn-ghost" id="s-test-alert">ทดสอบส่งแจ้งเตือน</button>
       <button class="btn btn-ghost" id="s-backup">สำรองข้อมูลตอนนี้</button>
@@ -904,6 +961,7 @@ async function renderSettings() {
     `;
 
     el('s-logout').onclick = () => signOut();
+    renderWebullSlot();
     el('s-test-alert').onclick = () => run('ส่งทดสอบแล้ว', () => api('alerts.test'));
     el('s-backup').onclick = () => run('สำรองข้อมูลแล้ว', () => api('backup.run'));
     el('s-rebuild').onclick = () => run('คำนวณพอร์ตใหม่แล้ว', async () => {
@@ -920,6 +978,30 @@ async function renderSettings() {
   } catch (e) {
     v.innerHTML = `<div class="empty"><strong>โหลดสถานะไม่สำเร็จ</strong>${esc(e.message)}</div>`;
   }
+}
+
+async function renderWebullSlot() {
+  const slot = el('webull-slot');
+  if (!slot) return;
+  let w;
+  try { w = await api('webull.status'); } catch (e) { slot.innerHTML = ''; return; }
+  const bad = (w.recon || []).filter(r => r.status !== 'ok');
+  slot.innerHTML = `
+    <div class="section-head"><h2>Webull</h2>
+      ${w.syncOn ? '<button class="btn-sm" data-wb-sync="1">ซิงก์ตอนนี้</button>' : ''}</div>
+    <div class="card">
+      <div class="kv"><span class="k">สถานะ</span><span class="v ${w.syncOn ? 'up-text' : 'muted'}">${w.syncOn ? 'ดึงอัตโนมัติทุก 15 นาที' : 'ยังไม่เปิดการซิงก์'}</span></div>
+      <div class="kv"><span class="k">เซิร์ฟเวอร์</span><span class="v">${w.env === 'prod' ? 'ของจริง' : 'ทดสอบ'}${w.ownKey ? '' : ' · บัญชีทดสอบสาธารณะ'}</span></div>
+      ${w.lastSyncAt ? `<div class="kv"><span class="k">ซิงก์ล่าสุด</span><span class="v">${esc(w.lastSyncAt)}</span></div>` : ''}
+      ${(w.recon || []).length ? `
+        <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)">
+          <div class="kv"><span class="k">เทียบยอดกับ Webull</span>
+            <span class="v ${bad.length ? 'down-text' : 'up-text'}">${bad.length ? 'ไม่ตรง ' + bad.length + ' รายการ' : 'ตรงทั้งหมด'}</span></div>
+          ${bad.map(r => `<div class="kv"><span class="k">${esc(r.item)}</span>
+            <span class="v down-text">Webull ${fmt(r.broker, 4)} · แอป ${fmt(r.ours, 4)}</span></div>`).join('')}
+          ${bad.length ? '<p class="hint">Webull ไม่ส่งรายการฝากเงิน แลกเงิน และปันผลผ่าน API ถ้ายอดเงินสดไม่ตรง ลองเช็กว่าบันทึกครบหรือยัง</p>' : ''}
+        </div>` : ''}
+    </div>`;
 }
 
 async function run(okMsg, fn) {
@@ -943,6 +1025,61 @@ function closeSheet() {
   el('sheet-body').innerHTML = '';
 }
 
+// ---------- บัญชีและ Cash Ledger ----------
+
+function accountsList() { return state.accounts || []; }
+
+function accountOptions(selected, excludeFirstMatch) {
+  const list = accountsList();
+  return list.map((a, i) => {
+    const sel = selected ? a.accountId === selected : (excludeFirstMatch ? i === 1 : i === 0);
+    return `<option value="${esc(a.accountId)}" ${sel ? 'selected' : ''}>${esc(a.name)}</option>`;
+  }).join('');
+}
+
+async function loadAccounts() {
+  try { state.accounts = await api('accounts.list'); }
+  catch (e) { state.accounts = state.accounts || []; }
+}
+
+async function cashSection() {
+  const f = state.ledgerFilter || {};
+  const led = await api('cash.ledger', { accountId: f.accountId || '', currency: f.currency || '', limit: 200 });
+  const accs = accountsList();
+
+  const bal = led.balances.filter(b => Math.abs(b.balance) >= 0.005);
+  return `
+    <div class="card">
+      ${bal.length ? bal.map(b => `
+        <div class="kv"><span class="k">${esc(b.account)} · ${esc(b.currency)}</span>
+          <span class="v ${b.balance < 0 ? 'down-text' : 'cash-text'}">${fmt(b.balance, 2)}</span></div>`).join('')
+        : '<div class="muted">ยังไม่มีเงินสดในบัญชีใด</div>'}
+    </div>
+
+    <div class="section-head"><h2>ความเคลื่อนไหวเงินสด</h2></div>
+    <div class="field-row">
+      ${accs.length > 1 ? `<div class="field"><select id="lf-acc" data-ledger-filter="accountId">
+        <option value="">ทุกบัญชี</option>
+        ${accs.map(a => `<option value="${esc(a.accountId)}" ${f.accountId === a.accountId ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}
+      </select></div>` : ''}
+      <div class="field"><select id="lf-cur" data-ledger-filter="currency">
+        <option value="">ทุกสกุลเงิน</option>
+        <option value="THB" ${f.currency === 'THB' ? 'selected' : ''}>THB</option>
+        <option value="USD" ${f.currency === 'USD' ? 'selected' : ''}>USD</option>
+      </select></div>
+    </div>
+    ${led.lines.length ? `<div class="card">${led.lines.map(l => `
+      <div class="list-row">
+        <div><div>${ACT_ICON[l.type] || '•'} ${TX_LABEL[l.type] || l.type} ${esc(l.symbol || '')}</div>
+          <div class="pos-sub">${esc(l.date)} · ${esc(l.account)} · ${esc(l.currency)}</div></div>
+        <div style="text-align:right">
+          <div class="${l.amount >= 0 ? 'up-text' : 'down-text'}">${signed(l.amount, 2)}</div>
+          <div class="pos-sub">คงเหลือ ${fmt(l.balanceAfter, 2)}</div>
+        </div>
+      </div>`).join('')}</div>` : '<div class="empty">ไม่มีรายการ</div>'}
+  `;
+}
+
 function sheetTx(prefill) {
   const p = prefill || {};
   openSheet('บันทึกรายการ', `
@@ -951,9 +1088,17 @@ function sheetTx(prefill) {
         `<button data-type="${t}" class="${i === 0 ? 'is-on' : ''}">${TX_LABEL[t]}</button>`).join('')}
     </div>
     <div class="seg" id="tx-type2">
-      ${['DIVIDEND', 'FX_CONVERT', 'FEE'].map(t =>
-        `<button data-type="${t}">${TX_LABEL[t]}</button>`).join('')}
+      ${['DIVIDEND', 'FX_CONVERT', 'FEE'].concat(accountsList().length > 1 ? ['TRANSFER'] : []).map(t =>
+        `<button data-type="${t}">${t === 'TRANSFER' ? 'โอน' : TX_LABEL[t]}</button>`).join('')}
     </div>
+
+    ${accountsList().length > 1 ? `
+    <div class="field-row">
+      <div class="field"><label for="f-account" id="f-account-label">บัญชี</label>
+        <select id="f-account">${accountOptions(p.account || state.lastAccount)}</select></div>
+      <div class="field" id="tx-to-wrap" hidden><label for="f-to">โอนไปบัญชี</label>
+        <select id="f-to">${accountOptions('', true)}</select></div>
+    </div>` : ''}
 
     <div class="field"><label for="f-date">วันที่</label>
       <input id="f-date" type="date" value="${new Date().toISOString().slice(0, 10)}"></div>
@@ -1023,6 +1168,12 @@ function sheetTx(prefill) {
       const isFx = type === 'FX_CONVERT';
       const needsSymbol = isTrade || type === 'DIVIDEND';
 
+      const toWrap = $('#tx-to-wrap', root);
+      if (toWrap) {
+        toWrap.hidden = type !== 'TRANSFER';
+        $('#f-account-label', root).textContent = type === 'TRANSFER' ? 'จากบัญชี' : 'บัญชี';
+      }
+
       $('#tx-symbol', root).hidden = !needsSymbol;
       $('#tx-trade', root).hidden = !isTrade;
       $('#tx-cash', root).hidden = isTrade || isFx;
@@ -1055,6 +1206,9 @@ function sheetTx(prefill) {
         note: $('#f-note', root).value,
         fxRate: Number($('#f-fxrate', root).value) || 0
       };
+      const accSel = $('#f-account', root);
+      if (accSel) { body.accountId = accSel.value; state.lastAccount = accSel.value; }
+      if (type === 'TRANSFER') body.toAccountId = $('#f-to', root).value;
 
       if (type === 'BUY' || type === 'SELL') {
         body.symbol = $('#f-symbol', root).value.trim().toUpperCase();
@@ -1451,6 +1605,20 @@ document.addEventListener('click', async (ev) => {
     return renderTransactions();
   }
 
+  if (t.closest('[data-wb-sync]')) {
+    return run('ซิงก์ Webull แล้ว', async () => {
+      const r = await api('webull.sync');
+      toast(`ดึงคำสั่ง ${r.orders} รายการ · บันทึกใหม่ ${r.created}`);
+      await refresh(true);
+      renderWebullSlot();
+    });
+  }
+
+    if (t.closest('[data-goto-ledger]')) {
+    state.subTab = 'cash';
+    return switchTab('transactions');
+  }
+
   const perfBtn = t.closest('[data-perf-period]');
   if (perfBtn) {
     state.perfPeriod = perfBtn.dataset.perfPeriod;
@@ -1614,6 +1782,14 @@ el('g-register').addEventListener('click', () => gateSubmit('register'));
 el('g-pin').addEventListener('keydown', (e) => { if (e.key === 'Enter') gateSubmit('login'); });
 
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeSheet(); });
+
+// ตัวกรอง Cash Ledger
+document.addEventListener('change', (e) => {
+  const f = e.target.closest('[data-ledger-filter]');
+  if (!f) return;
+  state.ledgerFilter = Object.assign({}, state.ledgerFilter, { [f.dataset.ledgerFilter]: f.value });
+  renderTransactions();
+});
 
 window.addEventListener('online', () => { banner(''); refresh(false); });
 window.addEventListener('offline', () => banner('ออฟไลน์ — แสดงข้อมูลที่บันทึกไว้ล่าสุด'));
