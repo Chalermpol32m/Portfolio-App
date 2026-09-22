@@ -942,6 +942,9 @@ async function renderSettings() {
 
       <div id="webull-slot"></div>
 
+      <div class="section-head"><h2>ภาษี</h2></div>
+      <button class="btn btn-ghost" id="s-tax">สรุปภาษีรายปี</button>
+
       <div class="section-head"><h2>การจัดการ</h2></div>
       <button class="btn btn-ghost" id="s-test-alert">ทดสอบส่งแจ้งเตือน</button>
       <button class="btn btn-ghost" id="s-backup">สำรองข้อมูลตอนนี้</button>
@@ -961,6 +964,7 @@ async function renderSettings() {
     `;
 
     el('s-logout').onclick = () => signOut();
+    el('s-tax').onclick = () => sheetTax();
     renderWebullSlot();
     el('s-test-alert').onclick = () => run('ส่งทดสอบแล้ว', () => api('alerts.test'));
     el('s-backup').onclick = () => run('สำรองข้อมูลแล้ว', () => api('backup.run'));
@@ -1077,6 +1081,91 @@ async function cashSection() {
           <div class="pos-sub">คงเหลือ ${fmt(l.balanceAfter, 2)}</div>
         </div>
       </div>`).join('')}</div>` : '<div class="empty">ไม่มีรายการ</div>'}
+  `;
+}
+
+// ---------- สรุปภาษีรายปี ----------
+
+async function sheetTax(year) {
+  openSheet('สรุปภาษีรายปี', skeleton(5));
+  let t;
+  try {
+    t = await api('tax.summary', year ? { year } : {});
+  } catch (e) {
+    el('sheet-body').innerHTML = `<div class="empty"><strong>โหลดไม่สำเร็จ</strong>${esc(e.message)}</div>`;
+    return;
+  }
+  el('sheet-body').innerHTML = taxBody(t);
+
+  $$('#tax-year button', el('sheet-body')).forEach(b =>
+    b.addEventListener('click', () => sheetTax(b.dataset.year)));
+}
+
+function taxBody(t) {
+  const th = t.dividendTH, us = t.dividendUS, cg = t.usCapitalGains;
+  return `
+    <div class="seg" id="tax-year">
+      ${t.availableYears.map(y =>
+        `<button data-year="${y}" class="${y === t.year ? 'is-on' : ''}">${y}</button>`).join('')}
+    </div>
+
+    <div class="card">
+      <div class="kv"><span class="k">เงินปันผลสุทธิรับทั้งปี</span>
+        <span class="v up-text">${fmt(t.dividendTotalTHB, 0)} บาท</span></div>
+      <div class="kv"><span class="k">ภาษีหัก ณ ที่จ่ายรวม</span>
+        <span class="v muted">${fmt(t.dividendTaxTotalTHB, 0)} บาท</span></div>
+    </div>
+
+    <div class="section-head"><h2>ปันผลหุ้นไทย</h2></div>
+    <div class="card">
+      <div class="kv"><span class="k">ก่อนหักภาษี</span><span class="v">${fmt(th.grossTHB, 2)} บาท</span></div>
+      <div class="kv"><span class="k">ภาษีหัก ณ ที่จ่าย (${fmt(th.effectiveRatePct, 1)}%)</span><span class="v muted">${fmt(th.taxTHB, 2)} บาท</span></div>
+      <div class="kv"><span class="k">ได้รับสุทธิ</span><span class="v up-text">${fmt(th.netTHB, 2)} บาท</span></div>
+      <div class="kv"><span class="k">จำนวนครั้ง</span><span class="v">${th.count} ครั้ง</span></div>
+      ${th.bySymbol.length ? `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)">
+        ${th.bySymbol.map(s => `<div class="kv"><span class="k">${esc(s.symbol)}</span>
+          <span class="v">${fmt(s.netTHB, 0)} บาท</span></div>`).join('')}</div>` : ''}
+      <p class="hint">เลือกได้ว่าจะให้ภาษีหัก ณ ที่จ่ายเป็นตัวจบ หรือนำไปรวมยื่นกับเงินได้อื่นปลายปีถ้าคำนวณแล้วได้คืนมากกว่า</p>
+    </div>
+
+    <div class="section-head"><h2>ปันผลหุ้นสหรัฐ</h2></div>
+    <div class="card">
+      ${us.count ? `
+        <div class="kv"><span class="k">ก่อนหักภาษี</span><span class="v">${fmt(us.grossUSD, 2)} USD <span class="muted">(${fmt(us.grossTHB, 0)} บาท)</span></span></div>
+        <div class="kv"><span class="k">ภาษีสหรัฐหัก (${fmt(us.effectiveRatePct, 1)}%)</span><span class="v muted">${fmt(us.taxUSD, 2)} USD</span></div>
+        <div class="kv"><span class="k">ได้รับสุทธิ</span><span class="v up-text">${fmt(us.netTHB, 2)} บาท</span></div>
+        <div class="kv"><span class="k">จำนวนครั้ง</span><span class="v">${us.count} ครั้ง</span></div>
+        ${us.bySymbol.length ? `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)">
+          ${us.bySymbol.map(s => `<div class="kv"><span class="k">${esc(s.symbol)}</span>
+            <span class="v">${fmt(s.netTHB, 0)} บาท</span></div>`).join('')}</div>` : ''}
+      ` : '<div class="muted">ไม่มีเงินปันผลหุ้นสหรัฐในปีนี้</div>'}
+    </div>
+
+    <div class="section-head"><h2>กำไร/ขาดทุนจากการขายหุ้นสหรัฐ</h2></div>
+    <div class="card">
+      ${cg.count ? `
+        <div class="kv"><span class="k">กำไรรวม (เป็นบาท ณ วันขายแต่ละครั้ง)</span>
+          <span class="v ${plClass(cg.totalGainTHB)}">${signed(cg.totalGainTHB, 0)} บาท</span></div>
+        <div class="kv"><span class="k">ยอดขายรวม</span><span class="v">${fmt(cg.totalProceedsTHB, 0)} บาท</span></div>
+        <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)">
+          ${cg.sales.map(s => `
+            <div class="list-row"><div><strong>${esc(s.symbol)}</strong>
+              <div class="pos-sub">${esc(s.date)} · ${fmt(s.quantity, s.quantity % 1 ? 4 : 0)} หุ้น</div></div>
+              <div class="${plClass(s.gainTHB)}" style="text-align:right">${signed(s.gainTHB, 0)}<div class="pos-sub">บาท</div></div>
+            </div>`).join('')}
+        </div>
+      ` : '<div class="muted">ไม่มีการขายหุ้นสหรัฐในปีนี้</div>'}
+      <p class="hint">ตัวเลขนี้เป็นข้อมูลดิบ ไม่ใช่ข้อสรุปว่าต้องเสียภาษีเท่าไร ขึ้นอยู่กับว่านำเงินเข้าไทยปีไหนและเงื่อนไขอื่นตามกฎหมาย</p>
+    </div>
+
+    <div class="section-head"><h2>อัตราภาษีที่ใช้อ้างอิง</h2></div>
+    <div class="card">${t.rules.map(r => `
+      <div class="kv"><span class="k">${esc(r.country)} · ${esc(r.note || r.taxType)}</span>
+        <span class="v">${fmt(r.rate * 100, 1)}%</span></div>`).join('')}
+      <p class="hint">ปรับอัตราได้ในชีท TaxRules ถ้ากฎหมายเปลี่ยน</p>
+    </div>
+
+    <p class="hint">${esc(t.caveat)}</p>
   `;
 }
 
