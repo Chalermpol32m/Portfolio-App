@@ -1152,7 +1152,7 @@ async function renderWebullSlot() {
     <div class="section-head"><h2>Webull</h2>
       ${w.syncOn ? '<button class="btn-sm" data-wb-sync="1">ซิงก์ตอนนี้</button>' : ''}</div>
     <div class="card">
-      <div class="kv"><span class="k">สถานะ</span><span class="v ${w.syncOn ? 'up-text' : 'muted'}">${w.syncOn ? 'ดึงอัตโนมัติทุก 15 นาที' : 'ยังไม่เปิดการซิงก์'}</span></div>
+      <div class="kv"><span class="k">สถานะ</span><span class="v ${w.syncOn ? 'up-text' : 'muted'}">${w.syncOn ? 'ดึงอัตโนมัติ ทุก 5 นาทีช่วงตลาดสหรัฐ · นอกเวลาชั่วโมงละครั้ง' : 'ยังไม่เปิดการซิงก์'}</span></div>
       <div class="kv"><span class="k">เซิร์ฟเวอร์</span><span class="v">${w.env === 'prod' ? 'ของจริง' : 'ทดสอบ'}${w.ownKey ? '' : ' · บัญชีทดสอบสาธารณะ'}</span></div>
       ${w.lastSyncAt ? `<div class="kv"><span class="k">ซิงก์ล่าสุด</span><span class="v">${esc(w.lastSyncAt)}</span></div>` : ''}
       ${(w.recon || []).length ? `
