@@ -9,6 +9,7 @@
    เพื่อไม่ต้องแก้ business logic ใน app.js — เปลี่ยนแค่หน้าตา ไม่เปลี่ยนพฤติกรรม */
 
 :root {
+  color-scheme: dark;              /* ให้เบราว์เซอร์วาด dropdown ปฏิทิน และแถบเลื่อนเป็นธีมมืด */
   --bg-main: #050816;
   --bg-main-2: #070B1D;
   --surface: rgba(255, 255, 255, .045);
@@ -176,6 +177,9 @@ button, input, select, textarea {
 .field input:focus, .field select:focus, .field textarea:focus {
   border-color: rgba(39,217,255,.5); box-shadow: 0 0 0 3px rgba(39,217,255,.12);
 }
+/* รายการตัวเลือกของ dropdown — เบราว์เซอร์บางตัวไม่สน color-scheme จึงกำหนดสีตรง ๆ อีกชั้น */
+select option, select optgroup { background-color: var(--surface-solid); color: var(--text-primary); }
+
 .field input::placeholder, .field textarea::placeholder { color: rgba(143,168,199,.55); }
 .field textarea { resize: vertical; min-height: 96px; line-height: 1.6; }
 
