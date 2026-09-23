@@ -259,10 +259,60 @@ function activityRow(t) {
 
 const ALLOC_COLORS = ['#6E8BD6', '#4FC08D', '#F2B544', '#B67FD0', '#5FB6C4', '#E08A5B', '#8D96B2'];
 
+/** กราฟวงกลมสัดส่วนการลงทุน — SVG ล้วน ไม่ต้องใช้ไลบรารี */
+function donutChart(alloc) {
+  const size = 104, stroke = 15, r = (size - stroke) / 2, c = 2 * Math.PI * r;
+  let offset = 0;
+  const arcs = alloc.map((a, i) => {
+    const frac = Math.max(a.pct, 0) / 100;
+    const seg = `<circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none"
+        stroke="${ALLOC_COLORS[i % ALLOC_COLORS.length]}" stroke-width="${stroke}"
+        stroke-dasharray="${(frac * c).toFixed(2)} ${c.toFixed(2)}"
+        stroke-dashoffset="${(-offset * c).toFixed(2)}" stroke-linecap="butt"/>`;
+    offset += frac;
+    return seg;
+  }).join('');
+  return `
+    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform:rotate(-90deg)">
+      <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="${stroke}"/>
+      ${arcs}
+    </svg>`;
+}
+
+/** เลขนับวิ่งขึ้น ใช้กับยอดรวมพอร์ตตอนโหลดข้อมูลใหม่ ทำงานไม่ถึง 500ms ตามหลัก micro-interaction */
+function animateCount(el2, to, decimals) {
+  const from = Number(el2.dataset.val) || 0;
+  el2.dataset.val = to;
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches && Math.abs(to - from) > 0.5) {
+    const dur = 820, t0 = performance.now();
+    const step = (t) => {
+      const p = Math.min(1, (t - t0) / dur);
+      const eased = 1 - Math.pow(1 - p, 3);
+      el2.textContent = fmt(from + (to - from) * eased, decimals || 0);
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  } else {
+    el2.textContent = fmt(to, decimals || 0);
+  }
+}
+
+function greetingLine() {
+  const h = new Date().getHours();
+  const word = h < 11 ? 'อรุณสวัสดิ์' : h < 17 ? 'สวัสดี' : 'สวัสดีตอนเย็น';
+  const name = state.user ? state.user.displayName : '';
+  const today = new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'long', year: 'numeric' });
+  return `
+    <div class="dash-greet">
+      <div><div class="dash-greet-hi">${word}${name ? ', ' + esc(name) : ''} 👋</div>
+        <div class="dash-greet-date">${today}</div></div>
+    </div>`;
+}
+
 function renderDashboard() {
   const v = view('dashboard');
   const d = state.dashboard;
-  if (!d) { v.innerHTML = skeleton(6); return; }
+  if (!d) { v.innerHTML = greetingLine() + skeleton(6); return; }
 
   const s = d.summary;
   const dayCls = plClass(s.dayChangeTHB);
@@ -270,7 +320,9 @@ function renderDashboard() {
   const other = d.allocation.slice(6).reduce((a, x) => a + x.valueTHB, 0);
   if (other > 0) alloc.push({ label: 'อื่น ๆ', valueTHB: other, pct: d.summary.totalTHB ? other / d.summary.totalTHB * 100 : 0 });
 
-  const positions = d.positions.map((p, i) => `
+  const showAllHold = !!state.showAllHoldings;
+  const posShown = showAllHold ? d.positions : d.positions.slice(0, 3);
+  const positions = posShown.map((p, i) => `
     <article class="pos" data-pos="${i}">
       <div>
         <div class="pos-sym">${esc(p.symbol)}<span class="mkt">${esc(p.market)}</span></div>
@@ -301,92 +353,80 @@ function renderDashboard() {
     </article>`).join('');
 
   v.innerHTML = `
-    <div class="hero">
-      <div class="hero-label">มูลค่าพอร์ตรวม</div>
-      <div class="hero-value">${fmt(s.totalTHB, 0)}<span class="sat">บาท</span></div>
-      <div class="hero-delta">
-        <span class="chip ${dayCls === 'up-text' ? 'up' : dayCls === 'down-text' ? 'down' : ''}">
-          วันนี้ ${signed(s.dayChangeTHB, 0)} (${signed(s.dayChangePct, 2)}%)
-        </span>
-        <span class="chip">USD/THB ${fmt(d.usdthb, 2)}</span>
+    ${greetingLine()}
+
+    <div class="hero glass-hero">
+      <div class="hero-label">มูลค่าทรัพย์สินรวม</div>
+      <div class="hero-value"><span id="hero-num">0</span><span class="sat">บาท</span></div>
+      <div class="hero-delta-main ${dayCls}">${signed(s.dayChangeTHB, 0)} บาท</div>
+      <div class="hero-delta-sub">
+        <span class="chip ${dayCls === 'up-text' ? 'up' : dayCls === 'down-text' ? 'down' : ''}">วันนี้ ${signed(s.dayChangePct, 2)}%</span>
+        <span class="hero-fx">USD/THB ${fmt(d.usdthb, 2)}</span>
       </div>
-      ${alloc.length ? `
-      <div class="alloc">${alloc.map((a, i) =>
-        `<span style="width:${Math.max(a.pct, 0)}%;background:${ALLOC_COLORS[i % ALLOC_COLORS.length]}"></span>`).join('')}</div>
-      <div class="alloc-legend">${alloc.map((a, i) =>
-        `<span><i style="background:${ALLOC_COLORS[i % ALLOC_COLORS.length]}"></i>${esc(a.label)} ${fmt(a.pct, 1)}%</span>`).join('')}</div>` : ''}
+
+      <div id="perf-slot"></div>
     </div>
 
-    <div class="card">
-      <div class="kv"><span class="k">ผลตอบแทนรวม</span>
+    <p class="hint" style="margin:-6px 0 10px">มูลค่าทรัพย์สินรวม = มูลค่าหุ้น + เงินสด</p>
+    <div class="metric-grid">
+      <div class="metric-tile">
+        <div class="lbl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>มูลค่าหุ้น</div>
+        <div class="val">${fmt(s.totalTHB - s.cashTHB, 0)}</div>
+      </div>
+      <div class="metric-tile">
+        <div class="lbl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="2.4"/></svg>เงินสด</div>
+        <div class="val cash-text">${fmt(s.cashTHB, 0)}</div>
+      </div>
+    </div>
+
+    <div class="card card-secondary ${plClass(s.totalPLTHB) === 'up-text' ? 'glow-soft-up' : plClass(s.totalPLTHB) === 'down-text' ? 'glow-soft-down' : ''}">
+      <div class="kv"><span class="k">ตั้งแต่เริ่มลงทุน</span>
         <span class="v ${plClass(s.totalPLTHB)}">${s.investedTHB > 0 ? signed(s.totalReturnPct, 2) + '%' : ''}</span></div>
-      <div class="${plClass(s.totalPLTHB)}" style="font-size:24px;font-weight:400;margin-bottom:8px">${signed(s.totalPLTHB, 0)} บาท</div>
+      <div class="${plClass(s.totalPLTHB)}" style="font-size:22px;font-weight:700;margin-bottom:8px">${signed(s.totalPLTHB, 0)} บาท</div>
       <div class="kv"><span class="k">กำไรจากราคาหุ้น</span><span class="v ${plClass(s.capitalGainTHB)}">${signed(s.capitalGainTHB, 0)}</span></div>
-      <div class="pos-sub" style="margin:-2px 0 6px">ยังไม่ขาย ${signed(s.unrealTotalTHB, 0)} · ขายแล้ว ${signed(s.realizedStockTHB + s.realizedFxTHB, 0)}
-        · ในนี้เป็นผลค่าเงิน ${signed(s.unrealFxTHB + s.realizedFxTHB, 0)}</div>
       <div class="kv"><span class="k">เงินปันผล</span><span class="v div-text">${signed(s.dividendTHB || 0, 0)}</span></div>
-      <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)">
-        <div class="kv"><span class="k">เงินลงทุนสุทธิ (ฝาก − ถอน)</span><span class="v">${fmt(s.investedTHB, 0)}</span></div>
-        <div class="kv"><span class="k">เงินสด</span><span class="v cash-text">${fmt(s.cashTHB, 0)}</span></div>
-      </div>
+      <span class="tag stub" style="margin-top:4px;display:inline-block">สองก้อนนี้ไม่ปนกัน</span>
     </div>
 
-    <div class="split" hidden>
-      <div class="card">
-        <div class="kv"><span class="k">กำไรยังไม่รับรู้</span></div>
-        <div class="hero-label ${plClass(s.unrealTotalTHB)}" style="font-size:20px;font-weight:400">${signed(s.unrealTotalTHB, 0)}</div>
-        <div class="kv"><span class="k">จากตัวหุ้น</span><span class="v ${plClass(s.unrealStockTHB)}">${signed(s.unrealStockTHB, 0)}</span></div>
-        <div class="kv"><span class="k">จากค่าเงิน</span><span class="v ${plClass(s.unrealFxTHB)}">${signed(s.unrealFxTHB, 0)}</span></div>
+    ${alloc.length ? `
+    <div class="section-head"><h2>สัดส่วนการลงทุน</h2></div>
+    <div class="card card-secondary">
+      <div class="donut-wrap" style="margin-top:0">
+        ${donutChart(alloc)}
+        <div class="alloc-legend">${alloc.slice(0, 5).map((a, i) =>
+          `<span class="row"><i style="background:${ALLOC_COLORS[i % ALLOC_COLORS.length]}"></i><span>${esc(a.label)}</span><b>${fmt(a.pct, 1)}%</b></span>`).join('')}</div>
       </div>
-      <div class="card">
-        <div class="kv"><span class="k">กำไรที่รับรู้แล้ว</span></div>
-        <div class="hero-label ${plClass(s.realizedTotalTHB)}" style="font-size:20px;font-weight:400">${signed(s.realizedTotalTHB, 0)}</div>
-        <div class="kv"><span class="k">จากตัวหุ้น</span><span class="v ${plClass(s.realizedStockTHB)}">${signed(s.realizedStockTHB, 0)}</span></div>
-        <div class="kv"><span class="k">จากค่าเงิน</span><span class="v ${plClass(s.realizedFxTHB)}">${signed(s.realizedFxTHB, 0)}</span></div>
-        <div class="kv"><span class="k">เงินปันผล</span><span class="v ${plClass(s.dividendTHB)}">${signed(s.dividendTHB || 0, 0)}</span></div>
-      </div>
-    </div>
-
-    <div id="perf-slot"></div>
+    </div>` : ''}
 
     <div class="section-head"><h2>หุ้นที่ถืออยู่</h2>
       <button class="btn-sm" data-open="tx">บันทึกรายการ</button></div>
     ${d.positions.length ? positions : `
       <div class="empty"><strong>ยังไม่มีหุ้นในพอร์ต</strong>
       เริ่มจากบันทึกเงินฝากเข้าพอร์ต แล้วบันทึกรายการซื้อหุ้นตัวแรก</div>`}
+    ${d.positions.length > 3 ? `
+      <button class="link-btn" data-toggle-holdings="1" style="margin:-4px 0 10px;display:block">
+        ${showAllHold ? 'แสดงน้อยลง' : `ดูทั้งหมด (${d.positions.length} ตัว) →`}</button>` : ''}
     ${d.positions.length ? `<p class="hint">ทุนในแอปรวมค่าคอมมิชชัน ค่าธรรมเนียม และ VAT แล้ว จึงสูงกว่าที่แอปโบรกเกอร์แสดงเล็กน้อย
-      กำไรที่เห็นคือกำไรหลังหักค่าใช้จ่ายจริง (กดที่หุ้นเพื่อดูทุนแบบไม่รวมค่าธรรมเนียม) ·
-      ราคาหุ้นไทยจาก Yahoo หน่วงราว 15–20 นาที หลังตลาดปิดจะตรงกับโบรกเกอร์</p>` : ''}
+      กดที่หุ้นเพื่อดูรายละเอียดทุนแบบไม่รวมค่าธรรมเนียมและที่มาของราคา</p>` : ''}
 
     <div id="health-slot"></div>
 
-    <div class="section-head"><h2>เงินสด</h2></div>
-    <div class="card">
-      ${d.cash.length ? d.cash.map(c => `
-        <div class="kv">
-          <span class="k">${esc(c.currency)}${c.currency !== 'THB' ? ` · ทุนเฉลี่ย ${fmt(c.avgFxRate, 2)}` : ''}</span>
-          <span class="v">${fmt(c.balance, 2)}${c.currency !== 'THB' ? ` <span class="muted">(${fmt(c.valueTHB, 0)} บาท)</span>` : ''}</span>
-        </div>
-        ${(c.byAccount || []).length > 1 ? c.byAccount.map(b =>
-          `<div class="kv" style="padding-left:12px"><span class="k">· ${esc(b.account)}</span><span class="v muted">${fmt(b.balance, 2)}</span></div>`).join('') : ''}
-        ${c.currency !== 'THB' ? `<div class="kv"><span class="k">กำไรค่าเงินบนเงินสด</span><span class="v ${plClass(c.unrealFxTHB)}">${signed(c.unrealFxTHB, 0)}</span></div>` : ''}
-      `).join('') : '<div class="muted">ยังไม่มีเงินสดในพอร์ต</div>'}
-    </div>
-
     ${(d.accounts || []).length > 1 ? `
       <div class="section-head"><h2>แยกตามโบรกเกอร์</h2></div>
-      <div class="card">${d.accounts.map(a => `
+      <div class="card card-secondary">${d.accounts.map(a => `
         <div class="kv"><span class="k">${esc(a.account)}</span><span class="v">${fmt(a.totalTHB, 0)} บาท</span></div>
         <div class="pos-sub" style="margin:-4px 0 6px">หุ้น ${fmt(a.stocksTHB, 0)} · เงินสด ${fmt(a.cashTHB, 0)}</div>`).join('')}
       </div>` : ''}
 
     ${(d.activity || []).length ? `
-      <div class="section-head"><h2>กิจกรรมล่าสุด</h2>
-        <button class="btn-sm" data-goto-ledger="1">ดูเงินสดทั้งหมด</button></div>
-      <div class="card">${d.activity.map(activityRow).join('')}</div>` : ''}
+      <div class="section-head"><h2>ธุรกรรมล่าสุด</h2>
+        <button class="btn-sm" data-goto-ledger="1">ดูทั้งหมด →</button></div>
+      <div class="card card-secondary">${d.activity.slice(0, 3).map(activityRow).join('')}</div>` : ''}
 
-    <p class="hint">อัปเดตเมื่อ ${esc(d.asOf)}</p>
+    <p class="hint">อัปเดตเมื่อ ${esc(d.asOf)} · เงินสด ${fmt(d.cash && s.cashTHB, 0)} บาท · ดูยอดเงินสดทั้งหมดในแท็บ "รายการ"</p>
   `;
+
+  animateCount(el('hero-num'), s.totalTHB, 0);
 
   $$('.pos', v).forEach(node => {
     node.addEventListener('click', (ev) => {
@@ -410,9 +450,8 @@ async function renderPerfSlot(force) {
 
   if (state.perf && !force) { slot.innerHTML = perfCard(state.perf); return; }
 
-  slot.innerHTML = `
-    <div class="section-head"><h2>ผลตอบแทนเทียบตลาด</h2></div>
-    <div class="card"><div class="skeleton"></div><div class="skeleton"></div></div>`;
+  slot.innerHTML = `<div class="skeleton" style="margin-top:14px;height:80px"></div>
+    <div class="skeleton" style="width:60%"></div>`;
 
   if (state.perfLoading) return;
   state.perfLoading = true;
@@ -422,15 +461,14 @@ async function renderPerfSlot(force) {
     if (s) s.innerHTML = perfCard(state.perf);
   } catch (e) {
     const s = el('perf-slot');
-    if (s) s.innerHTML = `<div class="section-head"><h2>ผลตอบแทนเทียบตลาด</h2></div>
-      <div class="empty"><strong>คำนวณไม่สำเร็จ</strong>${esc(e.message)}</div>`;
+    if (s) s.innerHTML = `<p class="hint" style="margin-top:14px">คำนวณกราฟไม่สำเร็จ: ${esc(e.message)}</p>`;
   } finally {
     state.perfLoading = false;
   }
 }
 
 function perfCard(p) {
-  if (p.empty) return '';
+  if (p.empty) return '<p class="hint" style="margin-top:14px">ยังไม่มีข้อมูลพอให้วาดกราฟ</p>';
   const key = state.perfPeriod || '1M';
   const per = p.periods.find(x => x.key === key) || p.periods[0];
   const s = p.series;
@@ -442,9 +480,9 @@ function perfCard(p) {
     const base = arr[i0];
     return arr.slice(i0).map(v => (v && base) ? v / base * 100 : null);
   };
-  const lines = [{ label: 'พอร์ตของคุณ', color: 'var(--text)', width: 2.2, values: rebase(s.portfolio) }];
+  const lines = [{ label: 'พอร์ตของคุณ', color: '#27D9FF', width: 2.4, values: rebase(s.portfolio) }];
   p.benchmarks.forEach(b => lines.push({
-    label: b.label, color: BENCH_COLORS[b.key] || '#8D96B2', width: 1.4, values: rebase(s.bench[b.key])
+    label: b.label, color: BENCH_COLORS[b.key] || '#8D96B2', width: 1.3, values: rebase(s.bench[b.key])
   }));
 
   const firstBench = p.benchmarks[0];
@@ -452,44 +490,34 @@ function perfCard(p) {
     ? per.portfolioPct - per.bench[firstBench.key] : null;
 
   return `
-    <div class="section-head"><h2>ผลตอบแทนเทียบตลาด</h2></div>
-    <div class="card">
-      <div class="seg" style="margin-bottom:12px">
-        ${p.periods.filter(x => x.key !== '1D').map(x =>
-          `<button data-perf-period="${x.key}" class="${x.key === key ? 'is-on' : ''}">${esc(x.key === 'ALL' ? 'ทั้งหมด' : x.key)}</button>`).join('')}
+    <div class="hero-chart-head">
+      <div>
+        <span class="hero-chart-pct ${plClass(per.portfolioPct)}">${signed(per.portfolioPct, 2)}%</span>
+        <span class="hero-chart-pnl ${plClass(per.pnlTHB)}">${signed(per.pnlTHB, 0)} บาท</span>
       </div>
+      ${diff !== null ? `<span class="hero-chart-vs ${plClass(diff)}">${diff >= 0 ? '▲' : '▼'} ${fmt(Math.abs(diff), 1)} จุด vs ${esc(firstBench.label)}</span>` : ''}
+    </div>
 
-      ${lineChart(lines)}
+    ${lineChart(lines)}
 
-      <div class="alloc-legend" style="margin:8px 0 14px">${lines.map(l =>
-        `<span><i style="background:${l.color}"></i>${esc(l.label)}</span>`).join('')}</div>
+    <div class="seg seg-mini">
+      ${p.periods.map(x =>
+        `<button data-perf-period="${x.key}" class="${x.key === key ? 'is-on' : ''}">${esc(x.key === 'ALL' ? 'ทั้งหมด' : x.key)}</button>`).join('')}
+    </div>
 
-      <div class="kv"><span class="k">พอร์ตของคุณ</span>
-        <span class="v ${plClass(per.portfolioPct)}">${signed(per.portfolioPct, 2)}%</span></div>
-      ${p.benchmarks.map(b => `
-        <div class="kv"><span class="k">${esc(b.label)}</span>
-          <span class="v ${plClass(per.bench[b.key])}">${per.bench[b.key] === null ? '—' : signed(per.bench[b.key], 2) + '%'}</span></div>`).join('')}
+    <div class="alloc-legend hero-chart-legend">${lines.map(l =>
+      `<span class="row"><i style="background:${l.color}"></i><span>${esc(l.label)}</span></span>`).join('')}</div>
 
-      <div style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)">
-        <div class="kv"><span class="k">กำไรเป็นเงินในช่วงนี้</span>
-          <span class="v ${plClass(per.pnlTHB)}">${signed(per.pnlTHB, 0)} บาท</span></div>
-        ${per.flowsTHB ? `<div class="kv"><span class="k">เงินฝากสุทธิในช่วงนี้</span>
-          <span class="v muted">${signed(per.flowsTHB, 0)} บาท</span></div>` : ''}
-        ${diff !== null ? `<div class="kv"><span class="k">เทียบ ${esc(firstBench.label)}</span>
-          <span class="v ${plClass(diff)}">${diff >= 0 ? 'ดีกว่า' : 'แพ้'} ${fmt(Math.abs(diff), 2)} จุด</span></div>` : ''}
-      </div>
-
-      ${per.partial ? `<p class="hint">พอร์ตเริ่มเมื่อ ${esc(p.startDate)} ยังไม่ครบช่วงที่เลือก ตัวเลขจึงนับตั้งแต่วันเริ่มพอร์ต</p>` : ''}
-      <p class="hint">${esc(p.note)}</p>
-    </div>`;
+    ${per.partial ? `<p class="hint">พอร์ตเริ่มเมื่อ ${esc(p.startDate)} — ยังไม่ครบช่วงที่เลือก</p>` : ''}
+  `;
 }
 
-/** กราฟเส้นแบบ SVG ล้วน ไม่ต้องโหลดไลบรารี */
+/** กราฟเส้นแบบ SVG ล้วน ไม่ต้องโหลดไลบรารี — มี gradient fill ใต้เส้นพอร์ตหลักและ glow บาง ๆ */
 function lineChart(lines) {
-  const W = 320, H = 140, P = 6;
+  const W = 320, H = 128, P = 6;
   const all = lines.flatMap(l => l.values.filter(v => v !== null && isFinite(v)));
   if (all.length < 2) {
-    return '<div class="empty" style="padding:18px">ข้อมูลยังน้อยเกินไปสำหรับวาดกราฟ ลองดูอีกครั้งในอีกไม่กี่วัน</div>';
+    return '<div class="empty" style="padding:16px;margin:10px 0">ข้อมูลยังน้อยเกินไปสำหรับวาดกราฟ ลองดูอีกครั้งในอีกไม่กี่วัน</div>';
   }
   let min = Math.min(...all, 100), max = Math.max(...all, 100);
   if (max - min < 1) { max += 0.5; min -= 0.5; }
@@ -497,28 +525,46 @@ function lineChart(lines) {
   const x = i => P + (n > 1 ? i / (n - 1) : 0) * (W - P * 2);
   const y = v => P + (1 - (v - min) / (max - min)) * (H - P * 2);
 
-  const paths = lines.map(l => {
-    let d = '', pen = false;
+  const gid = 'hg' + Math.random().toString(36).slice(2, 8);
+  const main = lines[0];
+  let mainD = '', pen = false, lastX = P, lastY = y(100);
+  main.values.forEach((v, i) => {
+    if (v === null || !isFinite(v)) { pen = false; return; }
+    mainD += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1) + ' ';
+    pen = true; lastX = x(i); lastY = y(v);
+  });
+  const fillD = mainD ? `${mainD} L ${lastX.toFixed(1)} ${(H - P).toFixed(1)} L ${x(0).toFixed(1)} ${(H - P).toFixed(1)} Z` : '';
+
+  const otherPaths = lines.slice(1).map(l => {
+    let d = '', pen2 = false;
     l.values.forEach((v, i) => {
-      if (v === null || !isFinite(v)) { pen = false; return; }
-      d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1) + ' ';
-      pen = true;
+      if (v === null || !isFinite(v)) { pen2 = false; return; }
+      d += (pen2 ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(v).toFixed(1) + ' ';
+      pen2 = true;
     });
-    return `<path d="${d}" fill="none" stroke="${l.color}" stroke-width="${l.width}"
-              stroke-linejoin="round" stroke-linecap="round"/>`;
-  }).reverse().join('');                 // วาดพอร์ตทีหลังสุดให้อยู่บนสุด
+    return `<path class="chart-line-other" d="${d}" fill="none" stroke="${l.color}" stroke-width="${l.width}" stroke-linejoin="round" stroke-linecap="round" opacity=".75"/>`;
+  }).join('');
 
   return `
-    <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block" role="img" aria-label="กราฟผลตอบแทนเทียบดัชนี">
-      <line x1="${P}" x2="${W - P}" y1="${y(100)}" y2="${y(100)}" stroke="var(--line)" stroke-dasharray="3 4"/>
-      ${paths}
+    <svg viewBox="0 0 ${W} ${H}" width="100%" style="display:block" role="img" aria-label="กราฟผลตอบแทนเทียบดัชนี" class="hero-chart-svg">
+      <defs>
+        <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="${main.color}" stop-opacity=".38"/>
+          <stop offset="100%" stop-color="${main.color}" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <line x1="${P}" x2="${W - P}" y1="${y(100)}" y2="${y(100)}" stroke="rgba(255,255,255,.14)" stroke-dasharray="3 4"/>
+      ${fillD ? `<path class="chart-fill" d="${fillD}" fill="url(#${gid})" stroke="none"/>` : ''}
+      ${otherPaths}
+      <path class="chart-main-path" d="${mainD}" fill="none" stroke="${main.color}" stroke-width="${main.width}"
+            stroke-linejoin="round" stroke-linecap="round" style="filter:drop-shadow(0 0 6px ${main.color}aa)"/>
     </svg>`;
 }
 
 // ---------- สุขภาพพอร์ต ----------
 
 function healthColor(score) {
-  return score >= 80 ? 'var(--up)' : score >= 60 ? '#8FC5A8' : score >= 40 ? 'var(--amber)' : 'var(--down)';
+  return score >= 80 ? 'var(--up)' : score >= 60 ? '#5FD9A8' : score >= 40 ? 'var(--amber)' : 'var(--down)';
 }
 
 async function renderHealthSlot(force) {
@@ -547,24 +593,45 @@ async function renderHealthSlot(force) {
   }
 }
 
+/** วงแหวนคะแนนสุขภาพพอร์ต — SVG arc เดี่ยว */
+function scoreRing(score, color) {
+  const size = 84, stroke = 8, r = (size - stroke) / 2, c = 2 * Math.PI * r;
+  const frac = Math.max(0, Math.min(100, score)) / 100;
+  return `
+    <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="transform:rotate(-90deg);filter:drop-shadow(0 0 8px ${color}66)">
+      <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="${stroke}"/>
+      <circle cx="${size / 2}" cy="${size / 2}" r="${r}" fill="none" stroke="${color}" stroke-width="${stroke}"
+        stroke-linecap="round" stroke-dasharray="${(frac * c).toFixed(2)} ${c.toFixed(2)}"/>
+    </svg>`;
+}
+
 function healthCard(r) {
   if (r.empty) return '';
   const h = r.health;
+  const top3 = h.dimensions.slice(0, 3);
+  const color = healthColor(h.score);
   return `
     <div class="section-head"><h2>สุขภาพพอร์ต</h2>
-      <button class="btn-sm" data-risk-detail="1">ดูความเสี่ยง</button></div>
+      <button class="btn-sm" data-risk-detail="1">ดูทั้งหมด</button></div>
     <div class="card">
-      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px">
-        <span style="font-size:36px;font-weight:300;color:${healthColor(h.score)}">${h.score}</span>
-        <span class="muted">/ 100</span>
-        <span class="chip" style="margin-left:auto;color:${healthColor(h.score)}">${esc(h.grade)}</span>
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px">
+        <div style="position:relative;flex:none">
+          ${scoreRing(h.score, color)}
+          <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+            <span style="font-size:22px;font-weight:700;color:${color}">${h.score}</span>
+            <span style="font-size:9.5px;color:var(--muted)">/ 100</span>
+          </div>
+        </div>
+        <div>
+          <span class="chip" style="color:${color}">${esc(h.grade)}</span>
+          <div class="pos-sub" style="margin-top:6px">3 ด้านหลักที่มีผลต่อคะแนน</div>
+        </div>
       </div>
-      ${h.dimensions.map(d => `
-        <div style="margin-bottom:12px">
+      ${top3.map(d => `
+        <div style="margin-bottom:10px">
           <div class="kv" style="padding:0 0 4px"><span class="k">${esc(d.label)}</span>
             <span class="v">${d.score === null ? '<span class="muted">—</span>' : d.score}</span></div>
           <div class="meter"><span style="width:${d.score || 0}%;background:${healthColor(d.score || 0)}"></span></div>
-          <div class="pos-sub" style="margin-top:4px">${esc(d.detail)}</div>
         </div>`).join('')}
       <p class="hint">วิเคราะห์เมื่อ ${esc(r.asOf)}</p>
     </div>`;
@@ -1169,16 +1236,51 @@ function taxBody(t) {
   `;
 }
 
+// ---------- เมนูลัดจากปุ่ม FAB กลาง ----------
+
+function sheetQuickActions() {
+  const items = [
+    { cls: 'buy', label: 'ซื้อหุ้น', run: () => sheetTx({ type: 'BUY' }),
+      icon: '<path d="M4 17V7m0 10 4-4M4 17l-4-4"/>' },
+    { cls: 'sell', label: 'ขายหุ้น', run: () => sheetTx({ type: 'SELL' }),
+      icon: '<path d="M20 7v10m0-10-4 4m4-4 4 4"/>' },
+    { cls: '', label: 'เติมเงิน', run: () => sheetTx({ type: 'DEPOSIT' }),
+      icon: '<path d="M12 5v14M5 12h14"/>' },
+    { cls: 'div', label: 'เพิ่มปันผล', run: () => sheetDividend(),
+      icon: '<path d="M12 3v18M7 8h7a3 3 0 0 1 0 6H8a3 3 0 0 0 0 6h7"/>' },
+    { cls: 'transfer', label: 'โอนเงิน', run: () => {
+        if (accountsList().length < 2) { toast('มีบัญชีเดียว ยังไม่มีที่ให้โอนไปครับ', true); return; }
+        sheetTx({ type: 'TRANSFER' });
+      }, icon: '<path d="M17 3 21 7l-4 4M3 11V9a2 2 0 0 1 2-2h16M7 21 3 17l4-4M21 13v2a2 2 0 0 1-2 2H3"/>' }
+  ];
+
+  openSheet('เมนูลัด', `
+    <div class="quick-sheet-grid">
+      ${items.map((it, i) => `
+        <button class="quick-sheet-item ${it.cls}" data-qa="${i}">
+          <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${it.icon}</svg></span>
+          ${it.label}
+        </button>`).join('')}
+    </div>
+  `, (root) => {
+    $$('[data-qa]', root).forEach(btn => btn.addEventListener('click', () => {
+      const it = items[Number(btn.dataset.qa)];
+      closeSheet();
+      it.run();
+    }));
+  });
+}
+
 function sheetTx(prefill) {
   const p = prefill || {};
   openSheet('บันทึกรายการ', `
     <div class="seg" id="tx-type">
-      ${['BUY', 'SELL', 'DEPOSIT', 'WITHDRAW'].map((t, i) =>
-        `<button data-type="${t}" class="${i === 0 ? 'is-on' : ''}">${TX_LABEL[t]}</button>`).join('')}
+      ${['BUY', 'SELL', 'DEPOSIT', 'WITHDRAW'].map((t) =>
+        `<button data-type="${t}" class="${t === (p.type || 'BUY') ? 'is-on' : ''}">${TX_LABEL[t]}</button>`).join('')}
     </div>
     <div class="seg" id="tx-type2">
       ${['DIVIDEND', 'FX_CONVERT', 'FEE'].concat(accountsList().length > 1 ? ['TRANSFER'] : []).map(t =>
-        `<button data-type="${t}">${t === 'TRANSFER' ? 'โอน' : TX_LABEL[t]}</button>`).join('')}
+        `<button data-type="${t}" class="${t === p.type ? 'is-on' : ''}">${t === 'TRANSFER' ? 'โอน' : TX_LABEL[t]}</button>`).join('')}
     </div>
 
     ${accountsList().length > 1 ? `
@@ -1708,6 +1810,11 @@ document.addEventListener('click', async (ev) => {
     return switchTab('transactions');
   }
 
+  if (t.closest('[data-toggle-holdings]')) {
+    state.showAllHoldings = !state.showAllHoldings;
+    return renderDashboard();
+  }
+
   const perfBtn = t.closest('[data-perf-period]');
   if (perfBtn) {
     state.perfPeriod = perfBtn.dataset.perfPeriod;
@@ -1864,6 +1971,13 @@ el('btn-refresh').addEventListener('click', async () => {
   if (state.busy) return;
   await refresh(true);
   if (state.tab !== 'dashboard') renderTab(state.tab);
+});
+
+el('btn-bell').addEventListener('click', () => switchTab('alerts'));
+el('btn-fab').addEventListener('click', (e) => {
+  const btn = e.currentTarget;
+  btn.classList.remove('pop'); void btn.offsetWidth; btn.classList.add('pop');
+  sheetQuickActions();
 });
 
 el('g-login').addEventListener('click', () => gateSubmit('login'));

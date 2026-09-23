@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#151B2E">
+<meta name="theme-color" content="#050816">
 <meta name="description" content="ติดตามพอร์ตหุ้นไทยและสหรัฐ พร้อมเตือนราคาที่คุณตั้งเอง">
 <title>พอร์ตของฉัน</title>
 
@@ -59,12 +59,21 @@
       <span id="top-title" class="top-title">พอร์ต</span>
       <span id="market-pills" class="market-pills"></span>
     </div>
-    <button id="btn-refresh" class="icon-btn" aria-label="อัปเดตราคาล่าสุด">
-      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-        <path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5" fill="none" stroke="currentColor"
-              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
-    </button>
+    <div class="topbar-actions">
+      <button id="btn-bell" class="icon-btn" aria-label="การแจ้งเตือน" data-tab-jump="alerts">
+        <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true">
+          <path d="M6 9a6 6 0 1 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 13 6 9zM10 18.5a2 2 0 0 0 4 0"
+                fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <i id="alert-dot" class="ping" hidden></i>
+      </button>
+      <button id="btn-refresh" class="icon-btn" aria-label="อัปเดตราคาล่าสุด">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5" fill="none" stroke="currentColor"
+                stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
   </header>
 
   <main id="views">
@@ -75,6 +84,7 @@
     <section class="view" data-view="settings" hidden></section>
   </main>
 
+  <div class="tabbar-wrap">
   <nav class="tabbar" role="tablist">
     <button class="tab is-active" data-tab="dashboard" role="tab">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V9m5 9V5m5 13v-6m5 6V8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -84,10 +94,8 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       <span>รายการ</span>
     </button>
-    <button class="tab" data-tab="alerts" role="tab">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9a6 6 0 1 1 12 0c0 4 1.5 5.5 1.5 5.5h-15S6 13 6 9zM10 18.5a2 2 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <span>เตือน</span>
-      <i id="alert-dot" class="dot" hidden></i>
+    <button class="tab" data-tab="fab-spacer" role="tab" style="visibility:hidden" tabindex="-1" aria-hidden="true">
+      <svg viewBox="0 0 24 24"></svg><span>&nbsp;</span>
     </button>
     <button class="tab" data-tab="watchlist" role="tab">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
@@ -97,7 +105,11 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 3v2.5M12 18.5V21M21 12h-2.5M5.5 12H3m13.4-6.4-1.8 1.8M9.4 16.6l-1.8 1.8m10.8 0-1.8-1.8M9.4 7.4 7.6 5.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       <span>ตั้งค่า</span>
     </button>
+    <button class="fab" id="btn-fab" aria-label="เมนูลัด">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>
+    </button>
   </nav>
+  </div>
 </div>
 
 <!-- แผงเลื่อนขึ้นสำหรับฟอร์มต่าง ๆ -->
