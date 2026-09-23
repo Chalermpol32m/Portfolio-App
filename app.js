@@ -323,6 +323,49 @@ function animateCount(el2, to, decimals) {
   }
 }
 
+/**
+ * การ์ดกำไรขาดทุนจากค่าเงินของดอลลาร์ที่ถืออยู่ — ใช้ข้อมูลที่หลังบ้านคำนวณอยู่แล้ว (ทุนเฉลี่ยของเงินสดดอลลาร์)
+ * แอปแลกเงินเองไม่ได้ (Webull API ไม่มีคำสั่งแลกเงิน และแอปเราอ่านอย่างเดียว)
+ * จึงให้ตั้งเตือนเมื่อค่าเงินถึงเป้า แล้วไปแลกในแอป Webull และบันทึกกลับด้วยภาพ
+ */
+function fxCard(c, rate, spread, brokerFx, brokerFxAt) {
+  // มีเรตของ Webull จากการซิงก์ → ใช้ตรงๆ ไม่มี → ใช้ส่วนต่างที่ตั้งไว้ใน Settings
+  const hasBroker = Number(brokerFx) > 0;
+  const sp = hasBroker ? rate - Number(brokerFx)
+    : (Number(spread) >= 0 && spread !== undefined && spread !== null ? Number(spread) : 0.03);
+  const cost = c.balance * c.avgFxRate;
+  const pct = cost > 0 ? c.unrealFxTHB / cost * 100 : 0;
+  const cls = plClass(c.unrealFxTHB);
+  // ถ้าแลกกลับตอนนี้จริง: Webull รับซื้อที่ เรตตลาด − ส่วนต่าง
+  const sellRate = hasBroker ? Number(brokerFx) : rate - sp;
+  const netNow = c.balance * (sellRate - c.avgFxRate);
+  const breakEven = c.avgFxRate + sp;                              // เรตตลาดที่ต้องถึงก่อนจะเริ่มกำไรจริง
+  // เป้าเริ่มต้น: กำไรสุทธิ 2% — มีเรต Webull เตือนด้วยเรตนั้นตรงๆ ไม่มีค่อยใช้เรตตลาด + ส่วนต่าง
+  const alertCond = hasBroker ? 'WBFX_ABOVE' : 'FX_ABOVE';
+  const target = Math.ceil((c.avgFxRate * 1.02 + (hasBroker ? 0 : sp)) * 100) / 100;
+  return `
+    <div class="section-head"><h2>ค่าเงินดอลลาร์ที่ถืออยู่</h2></div>
+    <div class="card card-secondary">
+      <div class="kv"><span class="k">ถืออยู่</span><span class="v">${fmt(c.balance, 2)} USD</span></div>
+      <div class="kv"><span class="k">ทุนเฉลี่ย → เรตตลาดตอนนี้</span>
+        <span class="v">${fmt(c.avgFxRate, 3)} → ${fmt(rate, 3)}</span></div>
+      <div class="kv" style="margin-top:4px"><span class="k">กำไรค่าเงินตามเรตตลาด</span>
+        <span class="v ${cls}">${signed(c.unrealFxTHB, 0)} บาท <span style="font-size:12px">(${signed(pct, 2)}%)</span></span></div>
+      <div class="kv"><span class="k">ถ้าแลกกลับตอนนี้ (เรต ${fmt(sellRate, 3)})</span>
+        <span class="v ${plClass(netNow)}" style="font-size:17px">${signed(netNow, 0)} บาท</span></div>
+      ${Math.abs(c.realizedFxTHB) >= 0.5 ? `<div class="kv"><span class="k">แลกกลับแล้ว (กำไรที่รับรู้จริง)</span>
+        <span class="v ${plClass(c.realizedFxTHB)}">${signed(c.realizedFxTHB, 0)} บาท</span></div>` : ''}
+      <p class="hint">${hasBroker
+        ? `เรตของ Webull ตอนนี้ ${fmt(sellRate, 3)} ต่ำกว่าตลาด ${fmt(sp, 3)} บาท (อัปเดต ${esc(String(brokerFxAt).slice(11, 16))} ทุกรอบซิงก์)`
+        : `ยังไม่มีเรตจาก Webull ใช้ส่วนต่างโดยประมาณ ${fmt(sp, 2)} บาทจาก Settings`}
+        · จะเริ่มกำไรจริงเมื่อเรตตลาดเกิน ${fmt(breakEven, 3)}</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn-sm" data-fx-alert="${alertCond}|${target}">${hasBroker ? 'เตือนเมื่อเรต Webull ถึงเป้า' : 'เตือนเมื่อ USD/THB ถึงเป้า'}</button>
+        <button class="btn-sm" data-fx-record="1">แลกกลับแล้ว → บันทึกจากภาพ</button>
+      </div>
+    </div>`;
+}
+
 function greetingLine() {
   const h = new Date().getHours();
   const word = h < 11 ? 'อรุณสวัสดิ์' : h < 17 ? 'สวัสดี' : 'สวัสดีตอนเย็น';
@@ -346,6 +389,10 @@ function renderDashboard() {
   const other = d.allocation.slice(6).reduce((a, x) => a + x.valueTHB, 0);
   if (other > 0) alloc.push({ label: 'อื่น ๆ', valueTHB: other, pct: d.summary.totalTHB ? other / d.summary.totalTHB * 100 : 0 });
 
+  // มีเงินดอลลาร์หรือหุ้นสหรัฐไหม — ใช้ตัดสินว่าจะแสดงคำอธิบายเรื่องเรตแลกเปลี่ยน
+  const hasUsd = (d.cash || []).some(c => c.currency !== 'THB' && Math.abs(c.balance) > 0.005) ||
+                 d.positions.some(p => p.currency !== 'THB');
+  const usdCash = (d.cash || []).find(c => c.currency === 'USD' && c.balance > 0.005);
   const showAllHold = !!state.showAllHoldings;
   const posShown = showAllHold ? d.positions : d.positions.slice(0, 3);
   const positions = posShown.map((p, i) => `
@@ -394,6 +441,8 @@ function renderDashboard() {
     </div>
 
     <p class="hint" style="margin:-6px 0 10px">มูลค่าทรัพย์สินรวม = มูลค่าหุ้น + เงินสด</p>
+    ${hasUsd ? `<p class="hint" style="margin:-4px 0 12px">เงินดอลลาร์คิดเป็นบาทที่เรตตลาด ${fmt(d.usdthb, 2)} ตัวเลขเงินบาทจึงอาจต่างจากแอปโบรกเกอร์เล็กน้อย
+      เพราะโบรกเกอร์ใช้เรตรับซื้อดอลลาร์ของตัวเองซึ่งต่ำกว่าเรตตลาด — จำนวนดอลลาร์ตรงกันเสมอ</p>` : ''}
     <div class="metric-grid">
       <div class="metric-tile">
         <div class="lbl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>มูลค่าหุ้น</div>
@@ -413,6 +462,8 @@ function renderDashboard() {
       <div class="kv"><span class="k">เงินปันผล</span><span class="v div-text">${signed(s.dividendTHB || 0, 0)}</span></div>
       <span class="tag stub" style="margin-top:4px;display:inline-block">สองก้อนนี้ไม่ปนกัน</span>
     </div>
+
+    ${usdCash ? fxCard(usdCash, d.usdthb, d.fxSpread, d.brokerFx, d.brokerFxAt) : ''}
 
     ${alloc.length ? `
     <div class="section-head"><h2>สัดส่วนการลงทุน</h2></div>
@@ -434,6 +485,19 @@ function renderDashboard() {
         ${showAllHold ? 'แสดงน้อยลง' : `ดูทั้งหมด (${d.positions.length} ตัว) →`}</button>` : ''}
     ${d.positions.length ? `<p class="hint">ทุนในแอปรวมค่าคอมมิชชัน ค่าธรรมเนียม และ VAT แล้ว จึงสูงกว่าที่แอปโบรกเกอร์แสดงเล็กน้อย
       กดที่หุ้นเพื่อดูรายละเอียดทุนแบบไม่รวมค่าธรรมเนียมและที่มาของราคา</p>` : ''}
+
+    ${(d.openOrders || []).length ? `
+      <div class="section-head"><h2>คำสั่งที่รอ Fill</h2></div>
+      <div class="card card-secondary">${d.openOrders.map(o => `
+        <div class="list-row">
+          <div><div><span class="tag ${o.side === 'SELL' ? 'sell' : 'buy'}">${o.side === 'SELL' ? 'ขาย' : 'ซื้อ'}</span><strong>${esc(o.symbol)}</strong>
+            ${fmt(o.totalQty, o.totalQty % 1 ? 4 : 0)} หุ้น</div>
+            <div class="pos-sub">${o.limitPrice ? 'ตั้งราคา ' + fmt(o.limitPrice, 2) + ' USD' : esc(o.orderType)}
+              · ${esc(o.placeTime.slice(0, 10))}${o.filledQty ? ' · Fill แล้ว ' + fmt(o.filledQty, 4) : ''}</div></div>
+          <div class="pos-sub" style="text-align:right">${esc(o.status)}</div>
+        </div>`).join('')}
+        <p class="hint">ดึงจาก Webull ทุกรอบซิงก์ พอ Fill ระบบบันทึกลงพอร์ตและส่งแจ้งเตือนให้</p>
+      </div>` : ''}
 
     <div id="health-slot"></div>
 
@@ -841,6 +905,7 @@ const COND_LABEL = {
   PRICE_ABOVE: 'ราคาขึ้นถึง', PRICE_BELOW: 'ราคาลงถึง',
   CHANGE_UP: 'บวกเกิน', CHANGE_DOWN: 'ลบเกิน',
   POSITION_PL_BELOW: 'ขาดทุนเกิน', FX_ABOVE: 'USD/THB ขึ้นถึง', FX_BELOW: 'USD/THB ลงถึง',
+  WBFX_ABOVE: 'เรต Webull ขึ้นถึง', WBFX_BELOW: 'เรต Webull ลงถึง',
   PORTFOLIO_ABOVE: 'พอร์ตถึง', PORTFOLIO_BELOW: 'พอร์ตต่ำกว่า'
 };
 const PCT_CONDS = ['CHANGE_UP', 'CHANGE_DOWN', 'POSITION_PL_BELOW'];
@@ -858,7 +923,7 @@ async function renderAlerts() {
       ${alerts.length ? `<div class="card">${alerts.map(a => `
         <div class="list-row">
           <div>
-            <div><strong>${esc(a.symbol || (a.condition.indexOf('FX') === 0 ? 'ค่าเงิน' : 'พอร์ตรวม'))}</strong>
+            <div><strong>${esc(a.symbol || (a.condition.indexOf('FX') >= 0 ? 'ค่าเงิน' : 'พอร์ตรวม'))}</strong>
               ${a.status === 'triggered' ? '<span class="tag alert">เตือนแล้ว</span>' : ''}</div>
             <div class="pos-sub">${COND_LABEL[a.condition] || a.condition} ${fmt(a.targetValue, 2)}${PCT_CONDS.includes(a.condition) ? '%' : ''}
               · ส่งทาง ${esc(a.channel)}${a.repeat ? ' · เตือนซ้ำได้' : ' · ครั้งเดียว'}</div>
@@ -1264,6 +1329,54 @@ function taxBody(t) {
 
 // ---------- เมนูลัดจากปุ่ม FAB กลาง ----------
 
+// ---------- อ่านภาพรายการแลกเงิน/ฝากเงินจากแอป Webull ----------
+
+/** ย่อภาพให้ไม่เกิน 1600px แล้วแปลงเป็น JPEG base64 — ภาพหน้าจอมือถือเล็กลงหลายเท่า ส่งเร็วขึ้น */
+function shrinkImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      const g = c.getContext('2d');
+      g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+      g.drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL('image/jpeg', 0.9).split(',')[1]);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('เปิดภาพไม่ได้')); };
+    img.src = url;
+  });
+}
+
+function readSlipImage() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = async () => {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    toast('กำลังอ่านภาพ…');
+    try {
+      const image = await shrinkImage(file);
+      const r = await api('ocr.slip', { image, mime: 'image/jpeg' });
+      if (!r.ok) { toast((r.warnings || ['อ่านภาพไม่สำเร็จ'])[0], true); return; }
+      const wb = accountsList().find(a => String(a.broker).toLowerCase() === 'webull');
+      const base = { date: r.date, note: 'อ่านจากภาพ Webull', ocr: r, account: wb ? wb.accountId : '' };
+      if (r.kind === 'FX') {
+        sheetTx(Object.assign(base, { type: 'FX_CONVERT', direction: r.direction, fxAmount: r.usd, fxRate: r.rate }));
+      } else {
+        sheetTx(Object.assign(base, { type: r.kind, amount: r.amount, currency: r.currency }));
+      }
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+  input.click();
+}
+
 function sheetQuickActions() {
   const items = [
     { cls: 'buy', label: 'ซื้อหุ้น', run: () => sheetTx({ type: 'BUY' }),
@@ -1274,6 +1387,8 @@ function sheetQuickActions() {
       icon: '<path d="M12 5v14M5 12h14"/>' },
     { cls: 'div', label: 'เพิ่มปันผล', run: () => sheetDividend(),
       icon: '<path d="M12 3v18M7 8h7a3 3 0 0 1 0 6H8a3 3 0 0 0 0 6h7"/>' },
+    { cls: '', label: 'อ่านจากภาพ', run: () => readSlipImage(),
+      icon: '<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>' },
     { cls: 'transfer', label: 'โอนเงิน', run: () => {
         if (accountsList().length < 2) { toast('มีบัญชีเดียว ยังไม่มีที่ให้โอนไปครับ', true); return; }
         sheetTx({ type: 'TRANSFER' });
@@ -1300,6 +1415,11 @@ function sheetQuickActions() {
 function sheetTx(prefill) {
   const p = prefill || {};
   openSheet('บันทึกรายการ', `
+    ${p.ocr ? `<div class="card card-secondary" style="margin-bottom:12px">
+      <div style="font-weight:600;margin-bottom:4px">📷 อ่านจากภาพแล้ว — ตรวจตัวเลขก่อนบันทึก</div>
+      ${(p.ocr.warnings || []).map(w => `<div class="pos-sub down-text">⚠ ${esc(w)}</div>`).join('')}
+      ${p.ocr.consistent && !(p.ocr.warnings || []).length ? '<div class="pos-sub up-text">ยอดดอลลาร์ × เรต ตรงกับยอดบาท</div>' : ''}
+    </div>` : ''}
     <div class="seg" id="tx-type">
       ${['BUY', 'SELL', 'DEPOSIT', 'WITHDRAW'].map((t) =>
         `<button data-type="${t}" class="${t === (p.type || 'BUY') ? 'is-on' : ''}">${TX_LABEL[t]}</button>`).join('')}
@@ -1318,7 +1438,7 @@ function sheetTx(prefill) {
     </div>` : ''}
 
     <div class="field"><label for="f-date">วันที่</label>
-      <input id="f-date" type="date" value="${new Date().toISOString().slice(0, 10)}"></div>
+      <input id="f-date" type="date" value="${esc(p.date || new Date().toISOString().slice(0, 10))}"></div>
 
     <div id="tx-symbol">
       <div class="field-row">
@@ -1351,9 +1471,9 @@ function sheetTx(prefill) {
     <div id="tx-cash" hidden>
       <div class="field-row">
         <div class="field"><label for="f-amount">จำนวนเงิน</label>
-          <input id="f-amount" type="number" inputmode="decimal" step="any" placeholder="0"></div>
+          <input id="f-amount" type="number" inputmode="decimal" step="any" placeholder="0" value="${p.amount || ''}"></div>
         <div class="field"><label for="f-currency">สกุลเงิน</label>
-          <select id="f-currency"><option value="THB">THB</option><option value="USD">USD</option></select></div>
+          <select id="f-currency"><option value="THB">THB</option><option value="USD" ${p.currency === 'USD' ? 'selected' : ''}>USD</option></select></div>
       </div>
     </div>
 
@@ -1361,20 +1481,26 @@ function sheetTx(prefill) {
       <div class="field"><label for="f-direction">ทิศทางการแลก</label>
         <select id="f-direction">
           <option value="THB>USD">บาท → ดอลลาร์</option>
-          <option value="USD>THB">ดอลลาร์ → บาท</option>
+          <option value="USD>THB" ${p.direction === 'USD>THB' ? 'selected' : ''}>ดอลลาร์ → บาท</option>
         </select></div>
       <div class="field"><label for="f-fxamount">จำนวนดอลลาร์</label>
-        <input id="f-fxamount" type="number" inputmode="decimal" step="any" placeholder="0"></div>
+        <input id="f-fxamount" type="number" inputmode="decimal" step="any" placeholder="0" value="${p.fxAmount || ''}"></div>
+      ${p.ocr && p.ocr.thb ? `<label class="pos-sub" style="display:flex;gap:8px;align-items:center;margin:-4px 0 12px">
+        <input type="checkbox" id="f-cashleg" ${p.direction === 'THB>USD' ? 'checked' : ''}>
+        ${p.direction === 'THB>USD'
+          ? `บันทึก <b>ฝากเงิน ฿${fmt(p.ocr.thb, 2)}</b> ก่อนแลกด้วย (โอนบาทเข้า Webull แล้วแลกทันที)`
+          : `บันทึก <b>ถอนเงิน ฿${fmt(p.ocr.thb, 2)}</b> หลังแลกด้วย (ถอนบาทออกจาก Webull)`}
+      </label>` : ''}
     </div>
 
     <div class="field" id="tx-fxrate-wrap" hidden>
       <label for="f-fxrate">อัตราแลกเปลี่ยน (บาทต่อ 1 ดอลลาร์)</label>
       <input id="f-fxrate" type="number" inputmode="decimal" step="any"
-             placeholder="ปล่อยว่างเพื่อใช้เรตล่าสุด">
+             placeholder="ปล่อยว่างเพื่อใช้เรตล่าสุด" value="${p.fxRate || ''}">
     </div>
 
     <div class="field"><label for="f-note">บันทึกช่วยจำ</label>
-      <input id="f-note" type="text" placeholder="เหตุผลที่ซื้อ/ขาย (ไม่บังคับ)"></div>
+      <input id="f-note" type="text" placeholder="เหตุผลที่ซื้อ/ขาย (ไม่บังคับ)" value="${esc(p.note || '')}"></div>
 
     <button class="btn btn-primary" id="f-save">บันทึกรายการ</button>
   `, (root) => {
@@ -1454,7 +1580,15 @@ function sheetTx(prefill) {
       const btn = $('#f-save', root);
       btn.disabled = true;
       try {
+        // ขาเงินบาทของการแลกที่อ่านจากภาพ: ฝากก่อนแลก หรือ ถอนหลังแลก
+        const leg = $('#f-cashleg', root);
+        const legBody = leg && leg.checked && type === 'FX_CONVERT' ? {
+          type: body.symbol === 'THB>USD' ? 'DEPOSIT' : 'WITHDRAW', date: body.date, market: 'CASH',
+          currency: 'THB', amount: p.ocr.thb, accountId: body.accountId, note: 'อ่านจากภาพ Webull'
+        } : null;
+        if (legBody && legBody.type === 'DEPOSIT') await api('tx.add', legBody);
         const r = await api('tx.add', body);
+        if (legBody && legBody.type === 'WITHDRAW') await api('tx.add', legBody);
         closeSheet();
         toast('บันทึกแล้ว');
         (r.warnings || []).forEach(w => toast(w, true));
@@ -1519,6 +1653,7 @@ function sheetAlert(prefill) {
       $('#a-target-label', root).textContent =
         PCT_CONDS.includes(c) ? 'เปอร์เซ็นต์ที่ต้องการให้เตือน' :
         c.indexOf('PORTFOLIO') === 0 ? 'มูลค่าพอร์ต (บาท)' :
+        c.indexOf('WBFX') === 0 ? 'เรตของ Webull (บาทต่อ 1 ดอลลาร์)' :
         c.indexOf('FX') === 0 ? 'อัตรา USD/THB' : 'ราคาเป้าหมาย';
     };
     $('#a-cond', root).addEventListener('change', sync);
@@ -1835,6 +1970,13 @@ document.addEventListener('click', async (ev) => {
     state.subTab = 'cash';
     return switchTab('transactions');
   }
+
+  const fxAlert = t.closest('[data-fx-alert]');
+  if (fxAlert) {
+    const [cond, val] = fxAlert.dataset.fxAlert.split('|');
+    return sheetAlert({ condition: cond, price: Number(val) });
+  }
+  if (t.closest('[data-fx-record]')) return readSlipImage();
 
   if (t.closest('[data-toggle-holdings]')) {
     state.showAllHoldings = !state.showAllHoldings;
