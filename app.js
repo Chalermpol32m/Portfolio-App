@@ -221,6 +221,7 @@ async function refresh(force) {
     banner(d.stalePrice ? 'ราคาบางตัวดึงไม่สำเร็จ กำลังแสดงราคาล่าสุดที่มี' : '');
     renderMarketPills(d.markets);
     if (state.tab === 'dashboard') renderDashboard();
+    backgroundWebullSync();
   } catch (e) {
     const cached = JSON.parse(localStorage.getItem(LS.dash) || 'null');
     if (cached) {
@@ -232,6 +233,31 @@ async function refresh(force) {
     }
   } finally {
     setBusy(false);
+  }
+}
+
+/**
+ * ซิงก์ Webull เบื้องหลังทุกครั้งที่เปิดแอป/รีเฟรช ไม่บังหน้าจอ ถ้ามีรายการใหม่ค่อยโหลดพอร์ตใหม่
+ * เว้นอย่างน้อย 60 วินาทีต่อครั้งฝั่งแอป (หลังบ้านกันซ้ำอีกชั้น)
+ */
+async function backgroundWebullSync() {
+  const now = Date.now();
+  if (state.wbSyncing || now - (state.wbLastSync || 0) < 60000) return;
+  state.wbSyncing = true;
+  state.wbLastSync = now;
+  try {
+    const r = await api('webull.autoSync');
+    if (r && r.created > 0) {
+      toast(`ดึงรายการใหม่จาก Webull ${r.created} รายการ`);
+      const d = await api('portfolio.dashboard', { force: false });
+      state.dashboard = d;
+      localStorage.setItem(LS.dash, JSON.stringify({ at: Date.now(), data: d }));
+      if (state.tab === 'dashboard') renderDashboard();
+    }
+  } catch (e) {
+    /* ซิงก์เบื้องหลังล้มเหลวไม่ต้องรบกวนผู้ใช้ ทริกเกอร์จะลองใหม่เอง */
+  } finally {
+    state.wbSyncing = false;
   }
 }
 
