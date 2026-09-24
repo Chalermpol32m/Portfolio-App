@@ -2381,6 +2381,16 @@ el('btn-refresh').addEventListener('click', async () => {
   if (state.tab !== 'dashboard') renderTab(state.tab);
 });
 
+// วัดความสูงแถบหัวข้อจริง ให้แถบแท็บของหน้า Portfolio ติดใต้พอดี (ชื่อหน้ายาวบนมือถืออาจตกเป็นสองบรรทัด)
+(function trackTopbarHeight() {
+  const bar = $('.topbar');
+  if (!bar) return;
+  const set = () => document.documentElement.style.setProperty('--topbar-h', bar.offsetHeight + 'px');
+  set();
+  if (window.ResizeObserver) new ResizeObserver(set).observe(bar);
+  else window.addEventListener('resize', set);
+})();
+
 el('btn-bell').addEventListener('click', () => switchTab('alerts'));
 el('btn-fab').addEventListener('click', (e) => {
   const btn = e.currentTarget;

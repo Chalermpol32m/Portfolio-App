@@ -631,7 +631,7 @@ select option, select optgroup { background-color: var(--surface-solid); color: 
 
 /* ---------- หน้า Portfolio ---------- */
 .pf-tabs {
-  position: sticky; top: 62px; z-index: 20;
+  position: sticky; top: var(--topbar-h, 62px); z-index: 20;   /* ติดใต้แถบหัวข้อพอดี (วัดความสูงจริงใน app.js) */
   margin: 0 calc(-1 * var(--pad)) 14px; padding: 8px var(--pad);
   background: rgba(5, 8, 22, .82); backdrop-filter: blur(14px);
 }
