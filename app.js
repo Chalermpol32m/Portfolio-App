@@ -90,6 +90,7 @@ async function api(action, payload, opts) {
   if (/^(tx\.(add|delete)|dividends\.(add|confirm|delete)|portfolio\.rebuild)$/.test(action)) {
     state.perf = null;
     state.risk = null;
+    state.pfDiv = null;
   }
   return json.data;
 }
@@ -187,11 +188,12 @@ async function gateSubmit(mode) {
 function switchTab(tab) {
   state.tab = tab;
   localStorage.setItem(LS.lastTab, tab);
-  $$('.tab').forEach(b => b.classList.toggle('is-active', b.dataset.tab === tab));
+  // หน้า Portfolio เปิดจาก Dashboard จึงให้แท็บ "พอร์ต" ยังสว่างอยู่
+  $$('.tab').forEach(b => b.classList.toggle('is-active', b.dataset.tab === (tab === 'portfolio' ? 'dashboard' : tab)));
   $$('.view').forEach(v => { v.hidden = v.dataset.view !== tab; });
   el('top-title').textContent = {
     dashboard: 'พอร์ต', transactions: 'รายการ', alerts: 'เตือนราคา',
-    watchlist: 'ติดตาม', settings: 'ตั้งค่า'
+    watchlist: 'ติดตาม', settings: 'ตั้งค่า', portfolio: 'พอร์ตการลงทุน'
   }[tab];
   renderTab(tab);
 }
@@ -208,6 +210,7 @@ async function renderTab(tab) {
   if (tab === 'alerts') return renderAlerts();
   if (tab === 'watchlist') return renderWatchlist();
   if (tab === 'settings') return renderSettings();
+  if (tab === 'portfolio') return renderPortfolio();
 }
 
 // ---------- หน้าพอร์ต ----------
@@ -378,28 +381,14 @@ function greetingLine() {
     </div>`;
 }
 
-function renderDashboard() {
-  const v = view('dashboard');
-  const d = state.dashboard;
-  if (!d) { v.innerHTML = greetingLine() + skeleton(6); return; }
-
-  const s = d.summary;
-  const dayCls = plClass(s.dayChangeTHB);
-  const alloc = d.allocation.slice(0, 6);
-  const other = d.allocation.slice(6).reduce((a, x) => a + x.valueTHB, 0);
-  if (other > 0) alloc.push({ label: 'อื่น ๆ', valueTHB: other, pct: d.summary.totalTHB ? other / d.summary.totalTHB * 100 : 0 });
-
-  // มีเงินดอลลาร์หรือหุ้นสหรัฐไหม — ใช้ตัดสินว่าจะแสดงคำอธิบายเรื่องเรตแลกเปลี่ยน
-  const hasUsd = (d.cash || []).some(c => c.currency !== 'THB' && Math.abs(c.balance) > 0.005) ||
-                 d.positions.some(p => p.currency !== 'THB');
-  const usdCash = (d.cash || []).find(c => c.currency === 'USD' && c.balance > 0.005);
-  const showAllHold = !!state.showAllHoldings;
-  const posShown = showAllHold ? d.positions : d.positions.slice(0, 3);
-  const positions = posShown.map((p, i) => `
+/** การ์ดหุ้นหนึ่งตัว — weightTotal (ไม่บังคับ) = มูลค่าพอร์ตรวม ใช้แสดงสัดส่วนในหน้า Portfolio */
+function posCard(p, i, weightTotal) {
+  return `
     <article class="pos" data-pos="${i}">
       <div>
         <div class="pos-sym">${esc(p.symbol)}<span class="mkt">${esc(p.market)}</span></div>
-        <div class="pos-sub">${fmt(p.quantity, p.quantity % 1 ? 4 : 0)} หุ้น · ทุน ${fmt(p.avgCostLocal, 2)} ${esc(p.currency)}</div>
+        <div class="pos-sub">${fmt(p.quantity, p.quantity % 1 ? 4 : 0)} หุ้น · ทุน ${fmt(p.avgCostLocal, 2)} ${esc(p.currency)}${
+          weightTotal ? ` · ${fmt(p.marketValueTHB / weightTotal * 100, 1)}% ของพอร์ต` : ''}</div>
       </div>
       <div>
         <div class="pos-val">${fmt(p.marketValueTHB, 0)}</div>
@@ -423,13 +412,251 @@ function renderDashboard() {
           <button class="btn-sm" data-quick-journal="${esc(p.symbol)}|${esc(p.market)}|${esc(p.currency)}|${p.price}">จดบันทึก</button>
         </div>
       </div>
-    </article>`).join('');
+    </article>`;
+}
+
+// ---------- หน้า Portfolio (แท็บ ภาพรวม / หุ้นที่ถือ / ผลตอบแทน / รายได้) ----------
+
+const PF_TABS = [['overview', 'ภาพรวม'], ['holdings', 'หุ้นที่ถือ'], ['performance', 'ผลตอบแทน'], ['income', 'รายได้']];
+
+function allocItems(d, mode) {
+  const total = d.summary.totalTHB || 0;
+  const pct = v => total ? v / total * 100 : 0;
+  if (mode === 'market') {
+    const m = {};
+    d.positions.forEach(p => { const k = p.market === 'US' ? 'หุ้นสหรัฐ' : 'หุ้นไทย'; m[k] = (m[k] || 0) + p.marketValueTHB; });
+    if (d.summary.cashTHB > 0) m['เงินสด'] = d.summary.cashTHB;
+    return Object.keys(m).map(k => ({ label: k, valueTHB: m[k], pct: pct(m[k]) })).sort((a, b) => b.valueTHB - a.valueTHB);
+  }
+  if (mode === 'currency') {
+    const m = {};
+    d.positions.forEach(p => { const k = p.currency === 'USD' ? 'ดอลลาร์ (USD)' : 'บาท (THB)'; m[k] = (m[k] || 0) + p.marketValueTHB; });
+    (d.cash || []).forEach(c => { const k = c.currency === 'USD' ? 'ดอลลาร์ (USD)' : 'บาท (THB)'; m[k] = (m[k] || 0) + c.valueTHB; });
+    return Object.keys(m).filter(k => m[k] > 0.005)
+      .map(k => ({ label: k, valueTHB: m[k], pct: pct(m[k]) })).sort((a, b) => b.valueTHB - a.valueTHB);
+  }
+  return d.allocation.map(a => ({ label: a.label, valueTHB: a.valueTHB, pct: a.pct }));
+}
+
+function pfOverview(d) {
+  const s = d.summary;
+  const stocks = s.totalTHB - s.cashTHB;
+  const sp = s.totalTHB ? stocks / s.totalTHB * 100 : 0;
+  const mode = state.pfAlloc || 'symbol';
+  const items = allocItems(d, mode);
+  const row = (k, v, cls) => `<div class="kv"><span class="k">${k}</span><span class="v ${cls || plClass(v)}">${signed(v, 0)}</span></div>`;
+  return `
+    <div class="card card-secondary">
+      <div class="kv"><span class="k">มูลค่าหุ้น</span><span class="v">${fmt(stocks, 0)} บาท</span></div>
+      <div class="kv"><span class="k">เงินสด</span><span class="v cash-text">${fmt(s.cashTHB, 0)} บาท</span></div>
+      <div class="split-bar"><span style="width:${sp}%;background:var(--primary)"></span><span style="width:${100 - sp}%;background:var(--secondary)"></span></div>
+      <div class="pos-sub">หุ้น ${fmt(sp, 1)}% · เงินสด ${fmt(100 - sp, 1)}%</div>
+    </div>
+
+    <div class="section-head"><h2>สัดส่วนการลงทุน</h2></div>
+    <div class="card card-secondary">
+      <div class="seg seg-mini" style="margin:0 0 14px">
+        ${[['symbol', 'ตามหุ้น'], ['market', 'ตามตลาด'], ['currency', 'ตามสกุลเงิน']].map(([k, l]) =>
+          `<button data-pf-alloc="${k}" class="${k === mode ? 'is-on' : ''}">${l}</button>`).join('')}
+      </div>
+      ${items.length ? `<div class="donut-wrap" style="margin-top:0">
+        ${donutChart(items)}
+        <div class="alloc-legend">${items.slice(0, 6).map((a, i) =>
+          `<span class="row"><i style="background:${ALLOC_COLORS[i % ALLOC_COLORS.length]}"></i><span>${esc(a.label)}</span><b>${fmt(a.pct, 1)}%</b></span>`).join('')}</div>
+      </div>` : '<div class="muted">ยังไม่มีข้อมูล</div>'}
+    </div>
+
+    <div class="section-head"><h2>กำไรขาดทุนแยกที่มา</h2></div>
+    <div class="card card-secondary">
+      <div class="pos-sub" style="margin-bottom:4px">ยังไม่ขาย</div>
+      ${row('· จากราคาหุ้น', s.unrealStockTHB)}
+      ${row('· จากค่าเงิน', s.unrealFxTHB)}
+      <div class="pos-sub" style="margin:8px 0 4px">ขายแล้ว (รับรู้จริง)</div>
+      ${row('· จากราคาหุ้น', s.realizedStockTHB)}
+      ${row('· จากค่าเงิน', s.realizedFxTHB)}
+      <div class="pos-sub" style="margin:8px 0 4px">รายได้</div>
+      ${row('· เงินปันผล', s.dividendTHB || 0, 'div-text')}
+      <div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)">
+        <div class="kv"><span class="k">รวมทั้งหมด</span><span class="v ${plClass(s.totalPLTHB)}" style="font-size:17px">${signed(s.totalPLTHB, 0)} บาท</span></div>
+        <div class="kv"><span class="k">เงินลงทุนสุทธิ (ฝาก − ถอน)</span><span class="v">${fmt(s.investedTHB, 0)} บาท</span></div>
+      </div>
+    </div>
+
+    ${(d.accounts || []).length > 1 ? `
+      <div class="section-head"><h2>แยกตามโบรกเกอร์</h2></div>
+      <div class="card card-secondary">${d.accounts.map(a => `
+        <div class="kv"><span class="k">${esc(a.account)}</span><span class="v">${fmt(a.totalTHB, 0)} บาท</span></div>`).join('')}</div>` : ''}`;
+}
+
+function pfHoldings(d) {
+  const sort = state.pfSort || 'value';
+  const key = { value: p => p.marketValueTHB, pl: p => p.unrealTotalTHB, pct: p => p.unrealPctLocal }[sort];
+  const list = d.positions.slice().sort((a, b) => key(b) - key(a));
+  const closed = d.closedPositions || [];
+  return `
+    <div class="seg seg-mini" style="margin:0 0 12px">
+      ${[['value', 'มูลค่า'], ['pl', 'กำไร (บาท)'], ['pct', 'กำไร (%)']].map(([k, l]) =>
+        `<button data-pf-sort="${k}" class="${k === sort ? 'is-on' : ''}">เรียงตาม${l}</button>`).join('')}
+    </div>
+    ${list.length ? list.map((p, i) => posCard(p, i, d.summary.totalTHB)).join('')
+      : '<div class="empty"><strong>ยังไม่มีหุ้นในพอร์ต</strong>ซื้อหุ้นใน Webull แล้วระบบจะดึงมาแสดงให้เอง</div>'}
+    ${list.length ? '<p class="hint">กดที่หุ้นเพื่อดูรายละเอียดทุน ที่มาของราคา และปุ่มตั้งเตือน</p>' : ''}
+
+    ${closed.length ? `
+      <div class="section-head"><h2>ขายหมดแล้ว</h2></div>
+      <div class="card card-secondary">${closed.map(c => `
+        <div class="list-row">
+          <div><strong>${esc(c.symbol)}</strong> <span class="pos-sub">${esc(c.market)}</span>
+            <div class="pos-sub">หุ้น ${signed(c.realizedStockTHB, 0)} · ค่าเงิน ${signed(c.realizedFxTHB, 0)}${c.dividendTHB ? ' · ปันผล ' + signed(c.dividendTHB, 0) : ''}</div></div>
+          <div class="${plClass(c.totalTHB)}" style="text-align:right;font-weight:600">${signed(c.totalTHB, 0)}<div class="pos-sub">บาท</div></div>
+        </div>`).join('')}</div>` : ''}`;
+}
+
+function pfPerformance() {
+  const p = state.perf;
+  const r = state.risk;
+  let table = '';
+  if (p && !p.empty) {
+    table = `
+      <div class="section-head"><h2>ผลตอบแทนทุกช่วง</h2></div>
+      <div class="card card-secondary" style="overflow-x:auto">
+        <table class="pf-table">
+          <tr><th></th><th>พอร์ต</th>${p.benchmarks.map(b => `<th>${esc(b.label)}</th>`).join('')}</tr>
+          ${p.periods.map(x => `<tr><td>${esc(x.key === 'ALL' ? 'ทั้งหมด' : x.key)}</td>
+            <td class="${plClass(x.portfolioPct)}">${signed(x.portfolioPct, 2)}%</td>
+            ${p.benchmarks.map(b => `<td class="${plClass(x.bench[b.key])}">${x.bench[b.key] === null ? '—' : signed(x.bench[b.key], 2) + '%'}</td>`).join('')}</tr>`).join('')}
+        </table>
+        <p class="hint">Time-Weighted Return ตัดผลของการฝากถอนเงินออก</p>
+      </div>`;
+  }
+  const m = r && !r.empty ? r.portfolio : null;
+  const metric = (l, v, suf) => `<div class="metric-tile"><div class="lbl">${l}</div><div class="val">${v === null || v === undefined ? '—' : fmt(v, 2) + (suf || '')}</div></div>`;
+  return `
+    <div class="card">
+      <div id="pf-perf">${p ? perfCard(p) : '<div class="skeleton" style="height:120px"></div>'}</div>
+    </div>
+    ${table}
+    <div class="section-head"><h2>ความเสี่ยง (ถือแบบนี้ย้อนหลัง 1 ปี)</h2>
+      <button class="btn-sm" data-risk-detail="1">ดูทั้งหมด</button></div>
+    ${m ? `<div class="metric-grid">
+        ${metric('ความผันผวนต่อปี', m.volPct, '%')}
+        ${metric('Beta', m.beta)}
+        ${metric('ร่วงหนักสุด', m.maxDrawdownPct, '%')}
+        ${metric('Sharpe', m.sharpe)}
+      </div>` : `<div class="card card-secondary"><div class="muted">${r && r.empty ? 'ยังไม่มีหุ้นให้วิเคราะห์' : 'กำลังคำนวณ…'}</div></div>`}`;
+}
+
+function pfIncome() {
+  const s = state.pfDiv;
+  if (!s) return '<div class="card"><div class="skeleton"></div><div class="skeleton"></div></div>';
+  return `
+    <div class="card card-secondary">
+      <div class="hero-label">เงินปันผลรับ 12 เดือนล่าสุด</div>
+      <div class="div-text" style="font-size:28px;font-weight:700;margin:4px 0 8px">${fmt(s.last12mTHB, 0)} บาท</div>
+      <div class="kv"><span class="k">อัตราผลตอบแทนเทียบทุน</span><span class="v">${fmt(s.yieldOnCost, 2)}%</span></div>
+      <div class="kv"><span class="k">อัตราผลตอบแทนเทียบราคาตลาด</span><span class="v">${fmt(s.yieldOnMarket, 2)}%</span></div>
+      <div class="kv"><span class="k">ปันผลรับทั้งหมด (สุทธิ)</span><span class="v">${fmt(s.totalTHB, 0)} บาท</span></div>
+      <div class="kv"><span class="k">ภาษีหัก ณ ที่จ่ายรวม</span><span class="v muted">${fmt(s.taxTHB, 0)} บาท</span></div>
+      ${s.pendingCount ? `<div style="margin-top:10px"><button class="btn-sm" data-goto-divs="1">
+        มี ${s.pendingCount} รายการรอยืนยัน (${fmt(s.pendingNetTHB, 0)} บาท) →</button></div>` : ''}
+    </div>
+
+    ${s.bySymbol.length ? `
+      <div class="section-head"><h2>แยกรายหุ้น</h2></div>
+      <div class="card card-secondary">${s.bySymbol.map(b => `
+        <div class="list-row">
+          <div><strong>${esc(b.symbol)}</strong>
+            <div class="pos-sub">${b.count} ครั้ง${b.yieldOnCost !== null && b.yieldOnCost !== undefined ? ' · เทียบทุน ' + fmt(b.yieldOnCost, 2) + '%' : ''}</div></div>
+          <div style="text-align:right"><div class="div-text">${fmt(b.netTHB, 0)}</div><div class="pos-sub">12 เดือน ${fmt(b.last12mTHB, 0)}</div></div>
+        </div>`).join('')}</div>` : ''}
+
+    ${s.byYear.length ? `
+      <div class="section-head"><h2>รายปี</h2></div>
+      <div class="card card-secondary">${s.byYear.map(y => `
+        <div class="kv"><span class="k">${esc(y.year)}</span><span class="v div-text">${fmt(y.netTHB, 0)} บาท</span></div>`).join('')}</div>` : ''}
+
+    ${!s.count ? '<div class="empty"><strong>ยังไม่มีเงินปันผล</strong>ปันผลที่ได้รับจะแสดงที่นี่ บันทึกได้จากปุ่ม + → เพิ่มปันผล</div>' : ''}`;
+}
+
+async function renderPortfolio() {
+  const v = view('portfolio');
+  const d = state.dashboard;
+  if (!d) { v.innerHTML = skeleton(6); refresh(false); return; }
+  const tab = state.pfTab || 'overview';
+  const s = d.summary;
+  const dayCls = plClass(s.dayChangeTHB);
+
+  let body = '';
+  if (tab === 'overview') body = pfOverview(d);
+  if (tab === 'holdings') body = pfHoldings(d);
+  if (tab === 'performance') body = pfPerformance();
+  if (tab === 'income') body = pfIncome();
+
+  v.innerHTML = `
+    <button class="link-btn" data-goto-dashboard="1" style="margin:0 0 12px">← กลับหน้าหลัก</button>
+    <div class="hero glass-hero" style="padding-bottom:18px">
+      <div class="hero-label">มูลค่าทรัพย์สินรวม</div>
+      <div class="hero-value" style="font-size:38px">${fmt(s.totalTHB, 0)}<span class="sat">บาท</span></div>
+      <div class="hero-delta-sub">
+        <span class="chip ${dayCls === 'up-text' ? 'up' : dayCls === 'down-text' ? 'down' : ''}">วันนี้ ${signed(s.dayChangePct, 2)}%</span>
+        <span class="chip ${plClass(s.totalPLTHB) === 'up-text' ? 'up' : plClass(s.totalPLTHB) === 'down-text' ? 'down' : ''}">ตั้งแต่เริ่มลงทุน ${s.investedTHB > 0 ? signed(s.totalReturnPct, 2) + '%' : '—'}</span>
+      </div>
+    </div>
+    <div class="seg pf-tabs">
+      ${PF_TABS.map(([k, l]) => `<button data-pf-tab="${k}" class="${k === tab ? 'is-on' : ''}">${l}</button>`).join('')}
+    </div>
+    <div class="pf-body">${body}</div>
+    <p class="hint">อัปเดตเมื่อ ${esc(d.asOf)}</p>`;
+
+  $$('.pos', v).forEach(node => node.addEventListener('click', (ev) => {
+    if (ev.target.closest('button')) return;
+    const det = $('.pos-detail', node);
+    det.hidden = !det.hidden;
+  }));
+
+  // โหลดข้อมูลที่ยังไม่มี แล้ววาดใหม่เฉพาะเมื่อยังอยู่แท็บเดิม
+  if (tab === 'performance') {
+    const need = [];
+    if (!state.perf) need.push(api('performance', {}).then(r => { state.perf = r; }));
+    if (!state.risk) need.push(api('risk.dashboard', {}).then(r => { state.risk = r; }));
+    if (need.length) {
+      try { await Promise.all(need); } catch (e) { toast(e.message, true); }
+      if (state.tab === 'portfolio' && state.pfTab === 'performance') renderPortfolio();
+    }
+  }
+  if (tab === 'income' && !state.pfDiv) {
+    try { state.pfDiv = await api('dividends.summary'); } catch (e) { toast(e.message, true); state.pfDiv = null; return; }
+    if (state.tab === 'portfolio' && state.pfTab === 'income') renderPortfolio();
+  }
+}
+
+function renderDashboard() {
+  const v = view('dashboard');
+  const d = state.dashboard;
+  if (!d) { v.innerHTML = greetingLine() + skeleton(6); return; }
+
+  const s = d.summary;
+  const dayCls = plClass(s.dayChangeTHB);
+  const alloc = d.allocation.slice(0, 6);
+  const other = d.allocation.slice(6).reduce((a, x) => a + x.valueTHB, 0);
+  if (other > 0) alloc.push({ label: 'อื่น ๆ', valueTHB: other, pct: d.summary.totalTHB ? other / d.summary.totalTHB * 100 : 0 });
+
+  // มีเงินดอลลาร์หรือหุ้นสหรัฐไหม — ใช้ตัดสินว่าจะแสดงคำอธิบายเรื่องเรตแลกเปลี่ยน
+  const hasUsd = (d.cash || []).some(c => c.currency !== 'THB' && Math.abs(c.balance) > 0.005) ||
+                 d.positions.some(p => p.currency !== 'THB');
+  const usdCash = (d.cash || []).find(c => c.currency === 'USD' && c.balance > 0.005);
+  const showAllHold = !!state.showAllHoldings;
+  const posShown = showAllHold ? d.positions : d.positions.slice(0, 3);
+  const positions = posShown.map((p, i) => posCard(p, i)).join('');
 
   v.innerHTML = `
     ${greetingLine()}
 
     <div class="hero glass-hero">
-      <div class="hero-label">มูลค่าทรัพย์สินรวม</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;position:relative">
+        <div class="hero-label">มูลค่าทรัพย์สินรวม</div>
+        <button class="link-btn" data-goto-portfolio="overview" style="font-size:12px">รายละเอียด →</button>
+      </div>
       <div class="hero-value"><span id="hero-num">0</span><span class="sat">บาท</span></div>
       <div class="hero-delta-main ${dayCls}">${signed(s.dayChangeTHB, 0)} บาท</div>
       <div class="hero-delta-sub">
@@ -476,13 +703,14 @@ function renderDashboard() {
     </div>` : ''}
 
     <div class="section-head"><h2>หุ้นที่ถืออยู่</h2>
-      <button class="btn-sm" data-open="tx">บันทึกรายการ</button></div>
+      ${d.positions.length ? '<button class="btn-sm" data-goto-portfolio="holdings">ดูทั้งหมด →</button>'
+                           : '<button class="btn-sm" data-open="tx">บันทึกรายการ</button>'}</div>
     ${d.positions.length ? positions : `
       <div class="empty"><strong>ยังไม่มีหุ้นในพอร์ต</strong>
       เริ่มจากบันทึกเงินฝากเข้าพอร์ต แล้วบันทึกรายการซื้อหุ้นตัวแรก</div>`}
     ${d.positions.length > 3 ? `
-      <button class="link-btn" data-toggle-holdings="1" style="margin:-4px 0 10px;display:block">
-        ${showAllHold ? 'แสดงน้อยลง' : `ดูทั้งหมด (${d.positions.length} ตัว) →`}</button>` : ''}
+      <button class="link-btn" data-goto-portfolio="holdings" style="margin:-4px 0 10px;display:block">
+        ดูทั้งหมด (${d.positions.length} ตัว) →</button>` : ''}
     ${d.positions.length ? `<p class="hint">ทุนในแอปรวมค่าคอมมิชชัน ค่าธรรมเนียม และ VAT แล้ว จึงสูงกว่าที่แอปโบรกเกอร์แสดงเล็กน้อย
       กดที่หุ้นเพื่อดูรายละเอียดทุนแบบไม่รวมค่าธรรมเนียมและที่มาของราคา</p>` : ''}
 
@@ -1978,6 +2206,17 @@ document.addEventListener('click', async (ev) => {
   }
   if (t.closest('[data-fx-record]')) return readSlipImage();
 
+  const gotoPf = t.closest('[data-goto-portfolio]');
+  if (gotoPf) { state.pfTab = gotoPf.dataset.gotoPortfolio; window.scrollTo(0, 0); return switchTab('portfolio'); }
+  if (t.closest('[data-goto-dashboard]')) { window.scrollTo(0, 0); return switchTab('dashboard'); }
+  const pfTab = t.closest('[data-pf-tab]');
+  if (pfTab) { state.pfTab = pfTab.dataset.pfTab; return renderPortfolio(); }
+  const pfAlloc = t.closest('[data-pf-alloc]');
+  if (pfAlloc) { state.pfAlloc = pfAlloc.dataset.pfAlloc; return renderPortfolio(); }
+  const pfSort = t.closest('[data-pf-sort]');
+  if (pfSort) { state.pfSort = pfSort.dataset.pfSort; return renderPortfolio(); }
+  if (t.closest('[data-goto-divs]')) { state.subTab = 'div'; return switchTab('transactions'); }
+
   if (t.closest('[data-toggle-holdings]')) {
     state.showAllHoldings = !state.showAllHoldings;
     return renderDashboard();
@@ -1988,6 +2227,7 @@ document.addEventListener('click', async (ev) => {
     state.perfPeriod = perfBtn.dataset.perfPeriod;
     const s = el('perf-slot');
     if (s && state.perf) s.innerHTML = perfCard(state.perf);
+    if (state.tab === 'portfolio' && state.pfTab === 'performance') renderPortfolio();
     return;
   }
 
