@@ -493,7 +493,14 @@ function pfHoldings(d) {
   const key = { value: p => p.marketValueTHB, pl: p => p.unrealTotalTHB, pct: p => p.unrealPctLocal }[sort];
   const list = d.positions.slice().sort((a, b) => key(b) - key(a));
   const closed = d.closedPositions || [];
+  const quoteSources = [...new Set(list.map(p => p.source).filter(Boolean))];
+  const quoteTimes = [...new Set(list.map(p => p.quoteTime).filter(Boolean))];
+  const hasStaleQuote = list.some(p => p.stale);
+  const quoteNote = quoteSources.length
+    ? `ราคาอ้างอิงจาก ${quoteSources.map(esc).join(', ')}${quoteTimes.length ? ' · อัปเดต ' + quoteTimes.map(esc).join(', ') : ''}${hasStaleQuote ? ' · มีราคาค้าง' : ''}<br>ราคาและเรต USD/THB อาจต่างจาก Dime ตามผู้ให้บริการและเวลาอัปเดต`
+    : 'ราคาและเรต USD/THB อาจต่างจาก Dime ตามผู้ให้บริการและเวลาอัปเดต';
   return `
+    <p class="hint" style="margin:0 0 12px">${quoteNote}</p>
     <div class="seg seg-mini" style="margin:0 0 12px">
       ${[['value', 'มูลค่า'], ['pl', 'กำไร (บาท)'], ['pct', 'กำไร (%)']].map(([k, l]) =>
         `<button data-pf-sort="${k}" class="${k === sort ? 'is-on' : ''}">เรียงตาม${l}</button>`).join('')}
@@ -711,6 +718,7 @@ function renderDashboard() {
     <div class="section-head"><h2>หุ้นที่ถืออยู่</h2>
       ${d.positions.length ? '<button class="btn-sm" data-goto-portfolio="holdings">ดูทั้งหมด →</button>'
                            : '<button class="btn-sm" data-open="tx">บันทึกรายการ</button>'}</div>
+    ${d.positions.length ? '<p class="hint" style="margin:-6px 0 10px">ราคาอ้างอิงจาก Yahoo Finance และเรตตลาด จึงอาจต่างจาก Dime ตามเวลาอัปเดต</p>' : ''}
     ${d.positions.length ? positions : `
       <div class="empty"><strong>ยังไม่มีหุ้นในพอร์ต</strong>
       เริ่มจากบันทึกเงินฝากเข้าพอร์ต แล้วบันทึกรายการซื้อหุ้นตัวแรก</div>`}
