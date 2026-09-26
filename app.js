@@ -681,6 +681,12 @@ function renderDashboard() {
       </div>
     </div>
 
+    <button class="uninvested-row" data-edit-uninvested="1">
+      <span><span class="k">เงินยังไม่ได้ลงทุน (Dime! Save)</span>
+        <span class="pos-sub">${d.uninvested && d.uninvested.asOf ? 'ณ ' + esc(String(d.uninvested.asOf).slice(0, 10)) + ' · ' : ''}ไม่รวมในมูลค่าพอร์ต · แตะเพื่ออัปเดต</span></span>
+      <span class="v cash-text">${d.uninvested && d.uninvested.asOf ? fmt(d.uninvested.thb, 0) + ' บาท' : 'ใส่ยอด'}</span>
+    </button>
+
     <div class="card card-secondary ${plClass(s.totalPLTHB) === 'up-text' ? 'glow-soft-up' : plClass(s.totalPLTHB) === 'down-text' ? 'glow-soft-down' : ''}">
       <div class="kv"><span class="k">ตั้งแต่เริ่มลงทุน</span>
         <span class="v ${plClass(s.totalPLTHB)}">${s.investedTHB > 0 ? signed(s.totalReturnPct, 2) + '%' : ''}</span></div>
@@ -1579,6 +1585,96 @@ function shrinkImage(file) {
   });
 }
 
+// ---------- Dime: ใบคำสั่งซื้อหุ้นสหรัฐด้วยเงินบาท → 3 รายการ ----------
+
+/**
+ * Dime แลกบาทเป็นดอลลาร์ให้ในตัวตอนซื้อ จึงบันทึกเป็น 3 รายการจากภาพเดียว:
+ *   ฝากเงินเข้าพอร์ต (บาทที่จ่ายรวม) → แลกบาทเป็นดอลลาร์ที่เรตในใบ → ซื้อหุ้น (ค่าคอม+VAT เป็นดอลลาร์)
+ * ผลคือเงินสดในพอร์ตเหลือศูนย์เหมือนใน Dime · รหัสอ้างอิงกันบันทึกซ้ำถ้าอัปภาพเดิมอีกครั้ง
+ */
+function sheetDimeOrder(r) {
+  openSheet('บันทึกจากใบคำสั่ง Dime', `
+    <div class="card card-secondary" style="margin-bottom:12px">
+      <div style="font-weight:600;margin-bottom:4px">📷 ซื้อ ${esc(r.symbol)} — ตรวจตัวเลขก่อนบันทึก</div>
+      ${(r.warnings || []).map(w => `<div class="pos-sub down-text">⚠ ${esc(w)}</div>`).join('')}
+      ${r.consistent && !(r.warnings || []).length ? '<div class="pos-sub up-text">ตัวเลขในใบตรงกันทุกช่อง</div>' : ''}
+    </div>
+    <div class="field-row">
+      <div class="field"><label for="o-symbol">หุ้น</label><input id="o-symbol" type="text" value="${esc(r.symbol)}"></div>
+      <div class="field"><label for="o-date">วันที่คำสั่งสำเร็จ</label><input id="o-date" type="date" value="${esc(r.date || new Date().toISOString().slice(0, 10))}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label for="o-qty">จำนวนหุ้น</label><input id="o-qty" type="number" step="any" value="${r.quantity}"></div>
+      <div class="field"><label for="o-price">ราคาที่ได้จริง (USD)</label><input id="o-price" type="number" step="any" value="${r.price}"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label for="o-thb">จ่ายรวม (บาท)</label><input id="o-thb" type="number" step="any" value="${r.thb}"></div>
+      <div class="field"><label for="o-rate">อัตราแลกเปลี่ยน</label><input id="o-rate" type="number" step="any" value="${r.rate}"></div>
+    </div>
+    <div class="field"><label for="o-usd">จำนวนเงิน (USD) รวมค่าธรรมเนียม</label><input id="o-usd" type="number" step="any" value="${r.usd}"></div>
+    <div class="card card-secondary" id="o-sum"></div>
+    <button class="btn btn-primary" id="o-save">บันทึก 3 รายการ</button>
+  `, (root) => {
+    const v = id => Number($('#' + id, root).value) || 0;
+    const sum = () => {
+      const fee = Math.round((v('o-usd') - v('o-qty') * v('o-price')) * 100) / 100;
+      $('#o-sum', root).innerHTML = `
+        <div class="pos-sub" style="margin-bottom:4px">ระบบจะบันทึก</div>
+        <div class="kv"><span class="k">1. ฝากเงินเข้าพอร์ต</span><span class="v">${fmt(v('o-thb'), 2)} บาท</span></div>
+        <div class="kv"><span class="k">2. แลกบาท → ดอลลาร์ @ ${fmt(v('o-rate'), 2)}</span><span class="v">${fmt(v('o-usd'), 2)} USD</span></div>
+        <div class="kv"><span class="k">3. ซื้อ ${esc($('#o-symbol', root).value.toUpperCase())} ค่าคอม+VAT</span><span class="v ${fee < 0 ? 'down-text' : ''}">${fmt(fee, 2)} USD</span></div>`;
+    };
+    $$('input', root).forEach(i => i.addEventListener('input', sum));
+    sum();
+
+    $('#o-save', root).addEventListener('click', async () => {
+      const symbol = $('#o-symbol', root).value.trim().toUpperCase();
+      const date = $('#o-date', root).value;
+      const qty = v('o-qty'), price = v('o-price'), usd = v('o-usd'), thb = v('o-thb'), rate = v('o-rate');
+      const fee = Math.round((usd - qty * price) * 100) / 100;
+      if (!symbol || !qty || !price || !usd || !thb || !rate) return toast('กรอกตัวเลขให้ครบ', true);
+      if (fee < 0) return toast('ดอลลาร์รวมน้อยกว่าจำนวนหุ้น × ราคา ตรวจตัวเลขอีกครั้ง', true);
+      const acc = accountsList()[0];
+      const ref = 'DIME:' + symbol + ':' + date + ':' + qty;
+      const common = { date, accountId: acc ? acc.accountId : '', note: 'Dime ซื้อ ' + symbol + ' ด้วยเงินบาท (อ่านจากภาพ)' };
+      const btn = $('#o-save', root);
+      btn.disabled = true;
+      try {
+        const r1 = await api('tx.add', Object.assign({}, common, { type: 'DEPOSIT', market: 'CASH', currency: 'THB', amount: thb, externalId: ref + ':DEP' }));
+        await api('tx.add', Object.assign({}, common, { type: 'FX_CONVERT', symbol: 'THB>USD', market: 'FX', currency: 'USD', quantity: usd, fxRate: rate, externalId: ref + ':FX' }));
+        await api('tx.add', Object.assign({}, common, { type: 'BUY', symbol, market: 'US', currency: 'USD', quantity: qty, price, fee, tax: 0, fxRate: rate, externalId: ref + ':BUY' }));
+        closeSheet();
+        toast(r1 && r1.duplicate ? 'ใบนี้เคยบันทึกแล้ว ไม่บันทึกซ้ำ' : `บันทึกซื้อ ${symbol} แล้ว`);
+        await refresh(true);
+      } catch (e) {
+        toast(e.message, true);
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+/** ยอดเงินใน Dime! Save ที่ยังไม่ได้ลงทุน — แสดงแยก ไม่รวมในมูลค่าพอร์ต */
+function sheetUninvested(thb, asOf) {
+  openSheet('เงินยังไม่ได้ลงทุน (Dime! Save)', `
+    <div class="field"><label for="u-thb">ยอดใน Dime! Save (บาท)</label>
+      <input id="u-thb" type="number" inputmode="decimal" step="any" value="${thb === '' ? '' : Number(thb)}"></div>
+    <div class="field"><label for="u-date">ณ วันที่</label>
+      <input id="u-date" type="date" value="${esc(asOf || new Date().toISOString().slice(0, 10))}"></div>
+    <p class="hint">แสดงแยกใต้ยอดพอร์ต ไม่นับรวมในมูลค่าพอร์ตและผลตอบแทน อัปเดตได้ด้วยการแคปหน้าเงินสดของ Dime แล้วอ่านจากภาพ</p>
+    <button class="btn btn-primary" id="u-save">บันทึก</button>
+  `, (root) => {
+    $('#u-save', root).addEventListener('click', async () => {
+      try {
+        await api('dime.save', { thb: Number($('#u-thb', root).value), asOf: $('#u-date', root).value });
+        closeSheet();
+        toast('อัปเดตยอดเงินยังไม่ได้ลงทุนแล้ว');
+        await refresh(true);
+      } catch (e) { toast(e.message, true); }
+    });
+  });
+}
+
 function readSlipImage() {
   const input = document.createElement('input');
   input.type = 'file';
@@ -1591,8 +1687,14 @@ function readSlipImage() {
       const image = await shrinkImage(file);
       const r = await api('ocr.slip', { image, mime: 'image/jpeg' });
       if (!r.ok) { toast((r.warnings || ['อ่านภาพไม่สำเร็จ'])[0], true); return; }
-      const wb = accountsList().find(a => String(a.broker).toLowerCase() === 'webull');
-      const base = { date: r.date, note: 'อ่านจากภาพ Webull', ocr: r, account: wb ? wb.accountId : '' };
+      if (r.kind === 'DIME_ORDER') return sheetDimeOrder(r);
+      if (r.kind === 'DIME_CASH') return sheetUninvested(r.saveTHB, r.asOf);
+      if (r.kind === 'DIME_DIV') {
+        return sheetDividend({ symbol: r.symbol, market: r.market, exDate: r.exDate, payDate: r.payDate,
+          perShare: r.perShare, shares: r.shares, net: r.net, note: 'อ่านจากภาพ · ภาษีหัก ' + r.tax + ' ' + r.currency, ocr: r });
+      }
+      const acc = accountsList()[0];
+      const base = { date: r.date, note: 'อ่านจากภาพ', ocr: r, account: acc ? acc.accountId : '' };
       if (r.kind === 'FX') {
         sheetTx(Object.assign(base, { type: 'FX_CONVERT', direction: r.direction, fxAmount: r.usd, fxRate: r.rate }));
       } else {
@@ -1968,27 +2070,27 @@ function sheetDividend(prefill) {
 
     <div class="field-row">
       <div class="field"><label for="d-ex">วัน XD (ขึ้นเครื่องหมาย)</label>
-        <input id="d-ex" type="date" value="${today}"></div>
+        <input id="d-ex" type="date" value="${esc(p.exDate || today)}"></div>
       <div class="field"><label for="d-pay">วันจ่ายเงิน</label>
-        <input id="d-pay" type="date" value="${today}"></div>
+        <input id="d-pay" type="date" value="${esc(p.payDate || today)}"></div>
     </div>
 
     <div class="field-row">
       <div class="field"><label for="d-per">ปันผลต่อหุ้น</label>
-        <input id="d-per" type="number" inputmode="decimal" step="any" placeholder="0"></div>
+        <input id="d-per" type="number" inputmode="decimal" step="any" placeholder="0" value="${p.perShare || ''}"></div>
       <div class="field"><label for="d-shares">จำนวนหุ้น</label>
         <input id="d-shares" type="number" inputmode="decimal" step="any"
-               placeholder="เว้นว่างให้คำนวณเอง"></div>
+               placeholder="เว้นว่างให้คำนวณเอง" value="${p.shares || ''}"></div>
     </div>
 
     <div class="seg" id="d-mode">
-      <button data-mode="auto" class="is-on">หักภาษีให้อัตโนมัติ</button>
-      <button data-mode="manual">กรอกยอดสุทธิเอง</button>
+      <button data-mode="auto" class="${p.net ? '' : 'is-on'}">หักภาษีให้อัตโนมัติ</button>
+      <button data-mode="manual" class="${p.net ? 'is-on' : ''}">กรอกยอดสุทธิเอง</button>
     </div>
 
     <div class="field" id="d-net-wrap" hidden>
       <label for="d-net">ยอดสุทธิที่เข้าบัญชีจริง</label>
-      <input id="d-net" type="number" inputmode="decimal" step="any" placeholder="0">
+      <input id="d-net" type="number" inputmode="decimal" step="any" placeholder="0" value="${p.net || ''}">
       <p class="hint">ระบบจะถอดกลับให้เองว่าถูกหักภาษีไปเท่าไร</p>
     </div>
 
@@ -1999,11 +2101,12 @@ function sheetDividend(prefill) {
     </div>
 
     <div class="field"><label for="d-note">บันทึกช่วยจำ</label>
-      <input id="d-note" type="text" placeholder="ไม่บังคับ"></div>
+      <input id="d-note" type="text" placeholder="ไม่บังคับ" value="${esc(p.note || '')}"></div>
+    ${p.ocr ? `<p class="hint">📷 อ่านจากภาพ: ปันผล ${fmt(p.ocr.gross, 2)} − ภาษี ${fmt(p.ocr.tax, 2)} = ${fmt(p.ocr.net, 2)} ${esc(p.ocr.currency)} ตรวจก่อนบันทึก</p>` : ''}
 
     <button class="btn btn-primary" id="d-save">บันทึก</button>
   `, (root) => {
-    let mode = 'auto';
+    let mode = p.net ? 'manual' : 'auto';
 
     const sync = () => {
       $('#d-net-wrap', root).hidden = mode !== 'manual';
@@ -2216,6 +2319,11 @@ document.addEventListener('click', async (ev) => {
   const pfSort = t.closest('[data-pf-sort]');
   if (pfSort) { state.pfSort = pfSort.dataset.pfSort; return renderPortfolio(); }
   if (t.closest('[data-goto-divs]')) { state.subTab = 'div'; return switchTab('transactions'); }
+
+  if (t.closest('[data-edit-uninvested]')) {
+    const u = (state.dashboard && state.dashboard.uninvested) || {};
+    return sheetUninvested(u.thb || '', '');
+  }
 
   if (t.closest('[data-toggle-holdings]')) {
     state.showAllHoldings = !state.showAllHoldings;
