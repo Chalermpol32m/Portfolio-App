@@ -381,7 +381,7 @@ function greetingLine() {
     </div>`;
 }
 
-/** การ์ดหุ้นหนึ่งตัว — weightTotal (ไม่บังคับ) = มูลค่าพอร์ตรวม ใช้แสดงสัดส่วนในหน้า Portfolio */
+/** การ์ดหุ้นหนึ่งตัว — weightTotal (ไม่บังคับ) = มูลค่าหุ้นรวม ใช้แสดงสัดส่วนในหน้า Portfolio */
 function posCard(p, i, weightTotal) {
   return `
     <article class="pos" data-pos="${i}">
@@ -492,6 +492,7 @@ function pfHoldings(d) {
   const sort = state.pfSort || 'value';
   const key = { value: p => p.marketValueTHB, pl: p => p.unrealTotalTHB, pct: p => p.unrealPctLocal }[sort];
   const list = d.positions.slice().sort((a, b) => key(b) - key(a));
+  const stockTotalTHB = list.reduce((total, p) => total + Number(p.marketValueTHB || 0), 0);
   const closed = d.closedPositions || [];
   const quoteSources = [...new Set(list.map(p => p.source).filter(Boolean))];
   const quoteTimes = [...new Set(list.map(p => p.quoteTime).filter(Boolean))];
@@ -505,7 +506,7 @@ function pfHoldings(d) {
       ${[['value', 'มูลค่า'], ['pl', 'กำไร (บาท)'], ['pct', 'กำไร (%)']].map(([k, l]) =>
         `<button data-pf-sort="${k}" class="${k === sort ? 'is-on' : ''}">เรียงตาม${l}</button>`).join('')}
     </div>
-    ${list.length ? list.map((p, i) => posCard(p, i, d.summary.totalTHB)).join('')
+    ${list.length ? list.map((p, i) => posCard(p, i, stockTotalTHB)).join('')
       : '<div class="empty"><strong>ยังไม่มีหุ้นในพอร์ต</strong>ซื้อหุ้นใน Webull แล้วระบบจะดึงมาแสดงให้เอง</div>'}
     ${list.length ? '<p class="hint">กดที่หุ้นเพื่อดูรายละเอียดทุน ที่มาของราคา และปุ่มตั้งเตือน</p>' : ''}
 
