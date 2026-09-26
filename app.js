@@ -422,6 +422,14 @@ const PF_TABS = [['overview', 'ภาพรวม'], ['holdings', 'หุ้น�
 function allocItems(d, mode) {
   const total = d.summary.totalTHB || 0;
   const pct = v => total ? v / total * 100 : 0;
+  if (mode === 'symbol') {
+    const stockTotal = d.positions.reduce((sum, p) => sum + Number(p.marketValueTHB || 0), 0);
+    return d.positions.map(p => ({
+      label: p.symbol,
+      valueTHB: p.marketValueTHB,
+      pct: stockTotal ? Number(p.marketValueTHB || 0) / stockTotal * 100 : 0
+    })).sort((a, b) => b.valueTHB - a.valueTHB);
+  }
   if (mode === 'market') {
     const m = {};
     d.positions.forEach(p => { const k = p.market === 'US' ? 'หุ้นสหรัฐ' : 'หุ้นไทย'; m[k] = (m[k] || 0) + p.marketValueTHB; });
@@ -435,7 +443,7 @@ function allocItems(d, mode) {
     return Object.keys(m).filter(k => m[k] > 0.005)
       .map(k => ({ label: k, valueTHB: m[k], pct: pct(m[k]) })).sort((a, b) => b.valueTHB - a.valueTHB);
   }
-  return d.allocation.map(a => ({ label: a.label, valueTHB: a.valueTHB, pct: a.pct }));
+  return [];
 }
 
 function pfOverview(d) {
