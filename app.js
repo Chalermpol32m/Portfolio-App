@@ -653,9 +653,16 @@ function renderDashboard() {
 
   const s = d.summary;
   const dayCls = plClass(s.dayChangeTHB);
-  const alloc = d.allocation.slice(0, 6);
-  const other = d.allocation.slice(6).reduce((a, x) => a + x.valueTHB, 0);
-  if (other > 0) alloc.push({ label: 'อื่น ๆ', valueTHB: other, pct: d.summary.totalTHB ? other / d.summary.totalTHB * 100 : 0 });
+  // วงกลม "สัดส่วนการลงทุน" แสดงเฉพาะหุ้น เพื่อให้เทียบกับหน้าหุ้นของ Dime ได้ตรงกัน
+  const stockTotalTHB = d.positions.reduce((sum, p) => sum + Number(p.marketValueTHB || 0), 0);
+  const stockAlloc = d.positions.map(p => ({
+    label: p.symbol,
+    valueTHB: Number(p.marketValueTHB || 0),
+    pct: stockTotalTHB ? Number(p.marketValueTHB || 0) / stockTotalTHB * 100 : 0
+  })).sort((a, b) => b.valueTHB - a.valueTHB);
+  const alloc = stockAlloc.slice(0, 6);
+  const other = stockAlloc.slice(6).reduce((sum, item) => sum + item.valueTHB, 0);
+  if (other > 0) alloc.push({ label: 'อื่น ๆ', valueTHB: other, pct: stockTotalTHB ? other / stockTotalTHB * 100 : 0 });
 
   // มีเงินดอลลาร์หรือหุ้นสหรัฐไหม — ใช้ตัดสินว่าจะแสดงคำอธิบายเรื่องเรตแลกเปลี่ยน
   const hasUsd = (d.cash || []).some(c => c.currency !== 'THB' && Math.abs(c.balance) > 0.005) ||
