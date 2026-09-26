@@ -1686,7 +1686,18 @@ function readSlipImage() {
     try {
       const image = await shrinkImage(file);
       const r = await api('ocr.slip', { image, mime: 'image/jpeg' });
-      if (!r.ok) { toast((r.warnings || ['อ่านภาพไม่สำเร็จ'])[0], true); return; }
+      if (!r.ok) {
+        // แสดงข้อความที่ OCR อ่านได้จริง ให้ก๊อปส่งไปแก้ตัวอ่านได้ตรงจุด
+        openSheet('อ่านภาพไม่สำเร็จ', `
+          <div class="card card-secondary"><div class="down-text">⚠ ${esc((r.warnings || ['อ่านภาพไม่สำเร็จ'])[0])}</div></div>
+          <div class="field"><label>ข้อความที่ระบบอ่านได้จากภาพ</label>
+            <textarea readonly style="min-height:180px;font-size:12px">${esc(r.textPreview || '(ไม่มีข้อความ)')}</textarea></div>
+          <p class="hint">ก๊อปข้อความนี้ส่งให้ Claude เพื่อปรับตัวอ่าน · ระหว่างนี้กดปุ่ม + แล้วกรอกเองได้</p>
+          <button class="btn btn-ghost" data-close-sheet="1">ปิด</button>`, (root) => {
+          $('[data-close-sheet]', root).addEventListener('click', closeSheet);
+        });
+        return;
+      }
       if (r.kind === 'DIME_ORDER') return sheetDimeOrder(r);
       if (r.kind === 'DIME_CASH') return sheetUninvested(r.saveTHB, r.asOf);
       if (r.kind === 'DIME_DIV') {
