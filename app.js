@@ -1585,12 +1585,12 @@ function shrinkImage(file) {
   });
 }
 
-// ---------- Dime: ใบคำสั่งซื้อหุ้นสหรัฐด้วยเงินบาท → 3 รายการ ----------
+// ---------- Dime: ใบคำสั่งซื้อหุ้นสหรัฐด้วยเงินบาท → FX + BUY ----------
 
 /**
- * Dime แลกบาทเป็นดอลลาร์ให้ในตัวตอนซื้อ จึงบันทึกเป็น 3 รายการจากภาพเดียว:
- *   ฝากเงินเข้าพอร์ต (บาทที่จ่ายรวม) → แลกบาทเป็นดอลลาร์ที่เรตในใบ → ซื้อหุ้น (ค่าคอม+VAT เป็นดอลลาร์)
- * ผลคือเงินสดในพอร์ตเหลือศูนย์เหมือนใน Dime · รหัสอ้างอิงกันบันทึกซ้ำถ้าอัปภาพเดิมอีกครั้ง
+ * เงิน THB ฝากเข้าพอร์ตไว้ก่อนแล้ว จึงไม่สร้าง DEPOSIT ซ้ำต่อใบซื้อ:
+ *   แลกบาทเป็นดอลลาร์ที่เรตในใบ → ซื้อหุ้น (ค่าคอม+VAT เป็นดอลลาร์)
+ * รหัสอ้างอิงช่วยกันบันทึกซ้ำถ้าอัปภาพเดิมอีกครั้ง
  */
 function sheetDimeOrder(r) {
   openSheet('บันทึกจากใบคำสั่ง Dime', `
@@ -1613,16 +1613,16 @@ function sheetDimeOrder(r) {
     </div>
     <div class="field"><label for="o-usd">จำนวนเงิน (USD) รวมค่าธรรมเนียม</label><input id="o-usd" type="number" step="any" value="${r.usd}"></div>
     <div class="card card-secondary" id="o-sum"></div>
-    <button class="btn btn-primary" id="o-save">บันทึก 3 รายการ</button>
+    <button class="btn btn-primary" id="o-save">บันทึก 2 รายการ</button>
   `, (root) => {
     const v = id => Number($('#' + id, root).value) || 0;
     const sum = () => {
       const fee = Math.round((v('o-usd') - v('o-qty') * v('o-price')) * 100) / 100;
       $('#o-sum', root).innerHTML = `
-        <div class="pos-sub" style="margin-bottom:4px">ระบบจะบันทึก</div>
-        <div class="kv"><span class="k">1. ฝากเงินเข้าพอร์ต</span><span class="v">${fmt(v('o-thb'), 2)} บาท</span></div>
-        <div class="kv"><span class="k">2. แลกบาท → ดอลลาร์ @ ${fmt(v('o-rate'), 2)}</span><span class="v">${fmt(v('o-usd'), 2)} USD</span></div>
-        <div class="kv"><span class="k">3. ซื้อ ${esc($('#o-symbol', root).value.toUpperCase())} ค่าคอม+VAT</span><span class="v ${fee < 0 ? 'down-text' : ''}">${fmt(fee, 2)} USD</span></div>`;
+        <div class="pos-sub" style="margin-bottom:4px">เงินฝากเดิมจะถูกใช้ โดยบันทึก</div>
+        <div class="kv"><span class="k">1. หัก ${fmt(v('o-thb'), 2)} บาท · แลกเป็น USD @ ${fmt(v('o-rate'), 2)}</span><span class="v">${fmt(v('o-usd'), 2)} USD</span></div>
+        
+        <div class="kv"><span class="k">2. ซื้อ ${esc($('#o-symbol', root).value.toUpperCase())} รวมค่าคอม+VAT</span><span class="v ${fee < 0 ? 'down-text' : ''}">${fmt(v('o-usd'), 2)} USD</span></div>`;
     };
     $$('input', root).forEach(i => i.addEventListener('input', sum));
     sum();
@@ -1640,8 +1640,8 @@ function sheetDimeOrder(r) {
       const btn = $('#o-save', root);
       btn.disabled = true;
       try {
-        const r1 = await api('tx.add', Object.assign({}, common, { type: 'DEPOSIT', market: 'CASH', currency: 'THB', amount: thb, externalId: ref + ':DEP' }));
-        await api('tx.add', Object.assign({}, common, { type: 'FX_CONVERT', symbol: 'THB>USD', market: 'FX', currency: 'USD', quantity: usd, fxRate: rate, externalId: ref + ':FX' }));
+
+        const r1 = await api('tx.add', Object.assign({}, common, { type: 'FX_CONVERT', symbol: 'THB>USD', market: 'FX', currency: 'USD', quantity: usd, fxRate: rate, externalId: ref + ':FX' }));
         await api('tx.add', Object.assign({}, common, { type: 'BUY', symbol, market: 'US', currency: 'USD', quantity: qty, price, fee, tax: 0, fxRate: rate, externalId: ref + ':BUY' }));
         closeSheet();
         toast(r1 && r1.duplicate ? 'ใบนี้เคยบันทึกแล้ว ไม่บันทึกซ้ำ' : `บันทึกซื้อ ${symbol} แล้ว`);
